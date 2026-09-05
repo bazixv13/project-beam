@@ -471,17 +471,18 @@ body {
   font-size: 1.75rem;
   font-weight: 800;
   letter-spacing: 0.25em;
-  text-indent: 0.25em;
   text-align: center;
   text-transform: uppercase;
   outline: none;
   transition: border-color 0.15s ease, background-color 0.15s ease;
-  padding: 0 44px 5px;
+  padding: 0 44px;
 }
 
 .code-input::placeholder {
   color: var(--text-faint);
   opacity: 0.5;
+  /* text-indent compensates for letter-spacing trailing space on last char,
+     centering the "--" placeholder visually without affecting the caret */
   letter-spacing: 0.25em;
   text-indent: 0.25em;
 }
