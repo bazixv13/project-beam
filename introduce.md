@@ -104,3 +104,9 @@ Changes will be live at https://filetrans.duckdns.org/ within ~90 seconds of pus
 - **Monochrome brutalist** — no colors other than black/white and the CSS variables already defined. No gradients, no shadows, no rounded decorative elements.
 - **Mobile-first** — all tap targets must be 48px or taller.
 - **No marketing text** — zero taglines, slogans, or AI-generated fluff.
+
+---
+
+## Git Rules
+
+- **Never use `git reset --hard`** — this rewrites shared history and will break the collaborator's local branch. To undo a commit, always use `git revert <hash>` instead. This creates a new commit that undoes the change safely without touching history.
