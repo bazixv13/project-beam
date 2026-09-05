@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Beam</title>
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('theme');
+          var prefDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = saved ? saved : (prefDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', theme);
+
+          var savedLang = localStorage.getItem('lang');
+          var sysLang = (navigator.languages && navigator.languages[0]) || navigator.language || '';
+          var initialLang = savedLang || (sysLang.toLowerCase().startsWith('pl') ? 'pl' : 'en');
+          document.documentElement.setAttribute('lang', initialLang);
+        } catch (_) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
