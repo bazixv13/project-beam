@@ -55,13 +55,13 @@ jobs:
           REMOTE="${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}"
 
           # Upload static frontend assets
-          scp -i ~/.ssh/deploy_key -r client/dist/* "$REMOTE:/opt/p2p-beam/dist/"
+          scp -i ~/.ssh/deploy_key -r client/dist/* "$REMOTE:/opt/p2p-beam-dev/dist/"
 
           # Upload compiled Rust binary atomically
-          scp -i ~/.ssh/deploy_key server/target/release/p2p-server "$REMOTE:/opt/p2p-beam/p2p-server.new"
+          scp -i ~/.ssh/deploy_key server/target/release/p2p-server "$REMOTE:/opt/p2p-beam-dev/p2p-server.new"
 
           # Replace binary and restart systemd service
-          ssh -i ~/.ssh/deploy_key "$REMOTE" "mv /opt/p2p-beam/p2p-server.new /opt/p2p-beam/p2p-server && chmod 0755 /opt/p2p-beam/p2p-server && sudo systemctl restart p2p-beam.service"
+          ssh -i ~/.ssh/deploy_key "$REMOTE" "mv /opt/p2p-beam-dev/p2p-server.new /opt/p2p-beam-dev/p2p-server && chmod 0755 /opt/p2p-beam-dev/p2p-server && sudo systemctl restart p2p-beam-dev.service"
 
       - name: Verify Live Deployment Endpoint
         run: |

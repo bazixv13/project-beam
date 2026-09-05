@@ -110,14 +110,14 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.1 */
+     never changes width when swapping BEAM ↔ v1.3.2 */
   display: inline-grid;
   position: relative;
 }
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.1';
+  content: 'v1.3.2';
   visibility: hidden;
   height: 0;
   overflow: hidden;

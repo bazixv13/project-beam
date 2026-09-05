@@ -161,7 +161,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.1';
+const APP_VERSION = 'v1.3.2';
 
 function BrandTitle() {
   const [showVersion, setShowVersion] = useState(false);
