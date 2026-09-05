@@ -64,6 +64,13 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 body {
@@ -110,14 +117,14 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.2 */
+     never changes width when swapping BEAM ↔ v1.3.5 */
   display: inline-grid;
   position: relative;
 }
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.2';
+  content: 'v1.3.5';
   visibility: hidden;
   height: 0;
   overflow: hidden;
@@ -446,16 +453,26 @@ body {
   width: 100%;
 }
 
-.input-group {
+.code-input-group {
   position: relative;
   width: 100%;
   display: flex;
   align-items: center;
+  gap: 0.6rem;
 }
 
-.code-input {
-  width: 100%;
+.code-boxes {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1;
+}
+
+.code-box {
+  flex: 1;
+  min-width: 0;
   height: 52px;
+  line-height: 52px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg-subtle);
@@ -463,34 +480,43 @@ body {
   font-family: var(--font-mono);
   font-size: 1.75rem;
   font-weight: 800;
-  letter-spacing: 0.25em;
+  letter-spacing: 0;
   text-align: center;
   text-transform: uppercase;
   outline: none;
   transition: border-color 0.15s ease, background-color 0.15s ease;
-  padding: 0 44px;
+  padding: 0;
+  margin: 0;
+  caret-color: var(--text-main);
 }
 
-.code-input:focus {
+.code-box::placeholder {
+  color: var(--text-faint);
+  opacity: 0.5;
+  font-weight: 600;
+}
+
+.code-box:focus {
   border-color: var(--border-focus);
 }
 
 .camera-btn {
-  position: absolute;
-  right: 8px;
-  width: 36px;
-  height: 36px;
-  border: none;
-  background: transparent;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-subtle);
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
 }
 
 .camera-btn:hover {
+  border-color: var(--border-focus);
   color: var(--text-main);
 }
 

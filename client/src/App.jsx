@@ -161,7 +161,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.2';
+const APP_VERSION = 'v1.3.5';
 
 function BrandTitle() {
   const [showVersion, setShowVersion] = useState(false);
@@ -198,6 +198,8 @@ function BrandTitle() {
 function App() {
   const [initialRoom] = useState(getInitialRoomState);
   const [roomId, setRoomId] = useState(initialRoom.roomId);
+  const codeInput1Ref = useRef(null);
+  const codeInput2Ref = useRef(null);
   const [connectionState, setConnectionState] = useState(initialRoom.connectionState);
   const [selectedFile, setSelectedFile] = useState(null);
   const [isZipping, setIsZipping] = useState(false);
@@ -427,6 +429,106 @@ function App() {
     sessionStorage.setItem('p2p_beam_room', JSON.stringify({ roomId: cleanRoom, isInitiator: false }));
     window.history.replaceState({ room: cleanRoom }, '', `${window.location.pathname}?room=${cleanRoom}`);
     initWebRTC(cleanRoom, false);
+  };
+
+  const handleChar1Change = (e) => {
+    const raw = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+    if (!raw) {
+      setRoomId('');
+      return;
+    }
+    if (raw.length >= 2) {
+      const full = raw.slice(0, 2);
+      setRoomId(full);
+      codeInput2Ref.current?.focus();
+      handleJoinRoom(full);
+      return;
+    }
+    const nextChar1 = raw.slice(-1);
+    const nextRoom = nextChar1 + (roomId[1] || '');
+    setRoomId(nextRoom);
+    codeInput2Ref.current?.focus();
+    if (nextRoom.length === 2) {
+      handleJoinRoom(nextRoom);
+    }
+  };
+
+  const handleChar2Change = (e) => {
+    const raw = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '');
+    if (!raw) {
+      setRoomId(roomId[0] || '');
+      return;
+    }
+    const char1 = roomId[0] || '';
+    if (!char1) {
+      const nextChar = raw.slice(0, 1);
+      setRoomId(nextChar);
+      codeInput2Ref.current?.focus();
+      return;
+    }
+    const nextChar2 = raw.slice(-1);
+    const nextRoom = char1 + nextChar2;
+    setRoomId(nextRoom);
+    if (nextRoom.length === 2) {
+      handleJoinRoom(nextRoom);
+    }
+  };
+
+  const handleBox1KeyDown = (e) => {
+    if (e.key === 'Enter') {
+      if (roomId.length === 2) handleJoinRoom();
+    } else if (e.key === 'ArrowRight') {
+      codeInput2Ref.current?.focus();
+    } else if (e.key === 'Backspace') {
+      setRoomId('');
+    }
+  };
+
+  const handleBox2KeyDown = (e) => {
+    if (e.key === 'Enter') {
+      if (roomId.length === 2) handleJoinRoom();
+    } else if (e.key === 'ArrowLeft') {
+      codeInput1Ref.current?.focus();
+    } else if (e.key === 'Backspace') {
+      if (roomId[1]) {
+        setRoomId(roomId[0] || '');
+      } else {
+        e.preventDefault();
+        setRoomId('');
+        codeInput1Ref.current?.focus();
+      }
+    }
+  };
+
+  const handlePasteCode = (e) => {
+    e.preventDefault();
+    const pastedText = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+    if (!pastedText) return;
+
+    let extracted = '';
+    try {
+      extracted = new URL(pastedText.trim()).searchParams.get('room') || '';
+    } catch (_) {}
+
+    if (!extracted) {
+      const match = pastedText.match(/[?&]room=([0-9a-zA-Z]{2})/i);
+      if (match) {
+        extracted = match[1];
+      } else {
+        extracted = pastedText.trim();
+      }
+    }
+
+    const clean = extracted.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 2);
+    if (clean.length > 0) {
+      setRoomId(clean);
+      if (clean.length === 1) {
+        codeInput2Ref.current?.focus();
+      } else if (clean.length === 2) {
+        codeInput2Ref.current?.focus();
+        handleJoinRoom(clean);
+      }
+    }
   };
 
   const handleScan = (decodedText) => {
@@ -791,26 +893,40 @@ function App() {
             </div>
 
             <div className="join-form">
-              <div className="input-group">
-                <input 
-                  type="text" 
-                  placeholder="--"
-                  value={roomId}
-                  maxLength={2}
-                  onChange={(e) => {
-                    const val = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 2);
-                    setRoomId(val);
-                    if (val.length === 2) {
-                      handleJoinRoom(val);
-                    }
-                  }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleJoinRoom(); }}
-                  className="code-input"
-                  autoCapitalize="characters"
-                  autoComplete="off"
-                  spellCheck={false}
-                  autoFocus
-                />
+              <div className="code-input-group" onPaste={handlePasteCode}>
+                <div className="code-boxes">
+                  <input 
+                    ref={codeInput1Ref}
+                    type="text" 
+                    placeholder="-"
+                    value={roomId[0] || ''}
+                    maxLength={2}
+                    onChange={handleChar1Change}
+                    onKeyDown={handleBox1KeyDown}
+                    onFocus={(e) => e.target.select()}
+                    className="code-box"
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-label="Room code character 1"
+                    autoFocus
+                  />
+                  <input 
+                    ref={codeInput2Ref}
+                    type="text" 
+                    placeholder="-"
+                    value={roomId[1] || ''}
+                    maxLength={2}
+                    onChange={handleChar2Change}
+                    onKeyDown={handleBox2KeyDown}
+                    onFocus={(e) => e.target.select()}
+                    className="code-box"
+                    autoCapitalize="characters"
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-label="Room code character 2"
+                  />
+                </div>
                 <button 
                   type="button"
                   className="camera-btn" 

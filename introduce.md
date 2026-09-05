@@ -25,7 +25,7 @@ git fetch origin && git checkout develop && git pull --rebase origin develop
 ## Current Version
 
 ```
-1.3.2
+1.3.5
 ```
 
 **Agents: whenever you make a meaningful change, bump this version** (`MAJOR.MINOR.PATCH`) **and update all three version references:**
