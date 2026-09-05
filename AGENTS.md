@@ -1,211 +1,135 @@
-# Project BEAM — Agent & Developer Handbook
+# AGENTS.md — AI Instructions for Project BEAM
 
-This handbook provides critical architectural context, workspace rules, build/deploy instructions, and step-by-step git directions for developers and AI agents working on **BEAM**.
-
----
-
-## 1. System & Security Profile
-
-- **Development Host:** Linux (Fedora), User: `kali`, Default Shell: `fish` (or `bash`).
-- **Workspace Location:** `/home/kali/Documents/project-beam` (symlinked as `/home/kali/Documents/project beam`).
-- **Target Remote Host:** Oracle Cloud Rocky Linux 9 instance (`ssh oracle-rocky`), 1 GB RAM, 1 vCPU core.
-- **Domains:** `https://beam.hs.vc/`, `https://filetrans.duckdns.org/` (Public IP: `92.5.26.201`).
-
-### Privileged Command Execution (Sudo Rules)
-When executing any command requiring elevated privileges (`root`) on the local development machine:
-1. **Write Explanation:** Write a single human-readable sentence explaining the command to: `/home/kali/.agents/sudo-reason.txt`
-2. **Execute Command:** Run using the graphical password prompt:
-   ```bash
-   env SUDO_ASKPASS=/home/kali/.agents/my-askpass sudo -A <command>
-   ```
-3. **Constraints:** Never prompt interactively for passwords in terminal, never ask the user to type passwords in chat, and never store passwords in plaintext.
-4. **System Tweaks:** Obtain explicit user consent before adjusting global system settings (e.g. `/etc`, `/usr`, `systemctl`).
+> **Notice to AI Agents:** You are assisting a developer working on **Project BEAM** (an ultra-lean, high-throughput WebRTC & native Rust file transfer engine). Read this document carefully before proposing, modifying, or testing any code.
 
 ---
 
-## 2. Architecture & Components
+## 1. Project Mission & Constraints
+
+- **Objective:** Maximum throughput, zero-bloat file transfer between browsers with 0ms room connection latency and high fault-tolerance.
+- **Production Environment:** Oracle Cloud Rocky Linux 9 instance (`1 GB RAM, 1 vCPU core`).
+- **Critical Resource Constraint:** Memory is severely constrained on production. The backend server must remain minimal (~1.5 MB RAM footprint) and never buffer entire files in memory. All streaming must be zero-copy or chunk-streamed in RAM.
+- **Public Endpoints:** `https://beam.hs.vc/` and `https://filetrans.duckdns.org/` (Served via Caddy reverse proxy to `127.0.0.1:3001`).
+
+---
+
+## 2. Codebase Architecture
 
 ```
 project-beam/
 ├── client/              # React 19 + Vite Frontend
 │   ├── src/
-│   │   ├── App.jsx      # Main application view, room management, theme, progress UI
-│   │   ├── webrtc.js    # Transfer engine: WebRTC DataChannel + WS relay fallback
-│   │   ├── index.css    # Monochrome brutalist single-surface design
-│   │   ├── QRScanner.jsx # Camera-based QR code room reader
-│   │   └── QRCodeDisplay.jsx # Fast SVG room link QR display
+│   │   ├── App.jsx      # UI layout, room orchestration, theme, transfer strips
+│   │   ├── webrtc.js    # Core transfer engine: WebRTC DataChannel + WS relay fallback
+│   │   ├── index.css    # High-contrast brutalist monochrome styling
+│   │   ├── QRScanner.jsx # Camera-based QR code reader
+│   │   └── QRCodeDisplay.jsx # SVG QR generator
 │   ├── package.json
 │   └── vite.config.js
-├── server/              # Native Rust Signaling & Binary Relay Server
-│   ├── src/
-│   │   └── main.rs      # Axum WebSocket server, room registry, peer-departure broadcast
-│   ├── Cargo.toml
-│   └── Cargo.lock
-├── .gitignore           # Git ignore rules for node_modules, target, dist, env
-├── README.md            # Public project overview and quickstart
-└── AGENTS.md            # This agent and developer handbook
+└── server/              # Native Rust Signaling & Binary Relay Server
+    ├── src/
+    │   └── main.rs      # Axum WebSocket server, room registry, departure alerts
+    ├── Cargo.toml
+    └── Cargo.lock
 ```
-
-### Backend (Native Rust Server)
-- **Source:** `server/` (package: `p2p-server`)
-- **Remote Binary:** `/opt/p2p-beam/p2p-server`
-- **Listening On:** `127.0.0.1:3001`
-- **Systemd Unit:** `/etc/systemd/system/p2p-beam.service` (`MemoryMax=32M`, `CPUQuota=100%`)
-- **Resource Footprint:** ~1.5 MB RAM, 0.0% CPU at idle.
-- **Role:** Handles 2-character rooms (`[0-9A-Z]{2}`), relays WebRTC signaling (offers, answers, ICE candidates), broadcasts peer departures (`user-left`), and provides zero-copy binary chunk streaming fallback when direct P2P is blocked.
-
-### Frontend (React 19 + Vite)
-- **Source:** `client/`
-- **Remote Webroot:** `/opt/p2p-beam/dist/`
-- **Design Philosophy:** Brutalist monochrome single-surface layout. High-contrast white/black progress bars, edge-to-edge mobile optimization, zero bloat.
-- **Transfer Engine (`client/src/webrtc.js`):**
-  - **Zero-Copy Uint8Array Slicing:** Uses `new Uint8Array(blockBuffer, blockPos, chunkLen)` directly into SCTP chunks (64 KB).
-  - **Strict WebRTC Verification:** Upgrades to direct P2P only after ICE connection state is verified (`connected` or `completed`) and DataChannel is open.
-  - **Graceful P2P-to-Relay Synchronization:** If WebRTC fails or times out (8s limit), both peers cleanly downgrade to WS relay (`p2p-downgrade` control signal) and the header badge immediately switches to `RELAY`.
-  - **In-Flight DataChannel Send Fallback:** If DataChannel disconnects or errors during transmission, `sendFile` catches it, downgrades mode, and seamlessly continues sending remaining chunks over WebSocket without terminating or restarting the transfer.
-  - **Resumable Transfers:** Preserves staged files across peer departures; checks byte offset on reconnect and resumes seamlessly.
-  - **Zero-Flicker Liveness:** Heartbeat timeout relaxed to 12s, refreshed by any incoming binary chunks or control messages to prevent false peer disconnection cycles.
-
-### Reverse Proxy & SSL (Caddy)
-- **Config:** `/etc/caddy/Caddyfile` on `oracle-rocky`
-- **Routing:** Reverse-proxies `beam.hs.vc` and `filetrans.duckdns.org` to `127.0.0.1:3001`.
-- **Certificates:** Automated Let's Encrypt TLS with HTTP/2 & HTTP/3.
 
 ---
 
-## 3. Local Development Workflows
+## 3. Strict Architectural Rules for AI Agents
 
-### Running the Frontend
+When modifying this repository, AI agents must strictly follow these invariants:
+
+### A. Frontend & Transfer Engine (`client/src/webrtc.js`)
+1. **Zero-Copy Uint8Array Slicing:**
+   - Never use `blockBuffer.slice(...)` for chunk generation; always use typed buffer views: `new Uint8Array(blockBuffer, blockPos, chunkLen)`. This avoids thousands of GC allocations per gigabyte.
+2. **WebRTC Direct Upgrade Invariants:**
+   - Only switch `mode = 'webrtc'` when **both** ICE state is verified (`connected` or `completed`) **and** `dataChannel.readyState === 'open'`.
+   - Never assume DataChannel `onopen` implies a working connection; in some browsers SCTP initializes before ICE candidates finish checking.
+3. **Graceful Downgrade & Mid-Transfer Fallback:**
+   - If WebRTC checks fail, time out (8s limit), or the DataChannel throws `Restricted`/errors, the client must trigger `downgradeToRelay(reason, notifyPeer)`.
+   - Both peers must be informed via `p2p-downgrade` WebSocket control packets so transport modes remain synchronized.
+   - If DataChannel drops mid-flight in `sendFile`, catch the error immediately and continue streaming remaining chunks over WebSocket (`this.socket`) without terminating or restarting the transfer.
+4. **Heartbeat & Liveness (Anti-Flicker):**
+   - Refresh `lastPeerHeartbeat` on **every** incoming chunk or control message.
+   - Never trigger disconnects while active transfers (`isSending || receiveFileId`) have an open WebSocket socket.
+   - Silence threshold is 12 seconds minimum.
+5. **Disk-Spilled Blob Flushing:**
+   - Receiver must batch incoming chunks into 16 MB disk-spilled `Blob` arrays to keep browser JavaScript heap under 16 MB even during multi-gigabyte transfers on mobile devices.
+
+### B. Backend (`server/src/main.rs`)
+1. **Zero State Persistence:**
+   - No database, no disk caching. All rooms and connections exist only in memory via thread-safe `DashMap`.
+2. **Departure Notification:**
+   - If a peer disconnects, navigates away, or closes the socket, broadcast `{"type": "user-left", "sender": id}` to any remaining room participant immediately.
+3. **Binary Relay Fallback:**
+   - Relay binary chunks directly across unbounded channels without unpacking, deserializing, or cloning payload buffers.
+
+---
+
+## 4. Local Build & Test Commands
+
+Before committing any changes, the AI agent must ensure both components compile cleanly:
+
 ```bash
+# 1. Test Client Build
 cd client
 npm install
-npm run dev
-```
-
-### Running the Rust Signaling Server
-```bash
-cd server
-cargo run
-```
-
-### Building the Project
-```bash
-# Build frontend bundle (creates client/dist/)
-cd client
 npm run build
 
-# Build release backend binary (creates server/target/release/p2p-server)
-cd server
+# 2. Test Server Compilation
+cd ../server
+cargo check
+# Or build release binary:
 cargo build --release
 ```
 
 ---
 
-## 4. Production Deployment to Oracle Cloud
+## 5. Directions for AI Agents to Commit & Push Changes
 
-### Deploying Frontend Changes
+When you (the AI agent) have finished implementing and verifying code changes for the contributor, execute or instruct the contributor to execute the following Git workflow:
+
+### Step 1: Verify Status
+Ensure no temporary, debug, or build output files (`dist/`, `target/`, `node_modules/`, `*.log`) are being tracked:
 ```bash
-# 1. Build Vite production bundle
-cd client && npm run build
-
-# 2. Upload assets to remote server
-scp -r dist/* oracle-rocky:/opt/p2p-beam/dist/
+git status
 ```
 
-### Deploying Backend Changes
+### Step 2: Stage Modified Files
+Stage the intentional changes cleanly:
 ```bash
-# 1. Build optimized release binary
-cd server && cargo build --release
+git add client/ server/ README.md
+```
 
-# 2. Upload binary to server and restart systemd service
+### Step 3: Format Commit Message
+Write a clear, conventional commit message describing the exact bugfix or feature:
+```bash
+git commit -m "fix(transfer): description of changes made"
+```
+
+### Step 4: Push to Remote
+Push the branch to the shared repository:
+```bash
+# If on a feature branch:
+git push origin <branch-name>
+
+# If on main:
+git push origin main
+```
+
+---
+
+## 6. Production Deployment Instructions (Reference)
+
+If the contributor instructs you to deploy updates to the production server:
+
+```bash
+# Deploy Frontend Assets:
+cd client && npm run build
+scp -r dist/* oracle-rocky:/opt/p2p-beam/dist/
+
+# Deploy Backend Binary:
+cd ../server && cargo build --release
 scp target/release/p2p-server oracle-rocky:/opt/p2p-beam/p2p-server.new
 ssh oracle-rocky "mv /opt/p2p-beam/p2p-server.new /opt/p2p-beam/p2p-server && sudo systemctl restart p2p-beam.service"
-
-# 3. Check service status
-ssh oracle-rocky "systemctl status p2p-beam --no-pager"
 ```
-
----
-
-## 5. Git Collaboration & Directions to Push After Changes
-
-### Initial Setup (Connect to Remote Repository)
-If pushing to GitHub, GitLab, or a shared git remote:
-
-1. **Configure Git Identity (if not already set globally):**
-   ```bash
-   git config user.name "Your Name"
-   git config user.email "your.email@example.com"
-   ```
-
-2. **Add Remote Origin:**
-   ```bash
-   # Using SSH (recommended):
-   git remote add origin git@github.com:<username>/<repo-name>.git
-
-   # Or using HTTPS:
-   git remote add origin https://github.com/<username>/<repo-name>.git
-   ```
-
-3. **Verify Remote Configuration:**
-   ```bash
-   git remote -v
-   ```
-
-### Daily Development & Pushing Changes
-
-Follow this standard workflow whenever making modifications:
-
-1. **Check Status of Working Tree:**
-   ```bash
-   git status
-   ```
-   Ensure untracked or unwanted files (like `node_modules`, `target`, `dist`) are ignored by `.gitignore`.
-
-2. **Create a Feature Branch (for collaborative work):**
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-3. **Stage Changes:**
-   ```bash
-   # Stage all modified and new files tracked by git:
-   git add .
-
-   # Or stage specific files:
-   git add client/src/webrtc.js client/src/App.jsx
-   ```
-
-4. **Commit Changes with a Clear Message:**
-   ```bash
-   git commit -m "fix(webrtc): synchronize p2p to relay fallback and eliminate receiver flicker"
-   ```
-
-5. **Push Changes to the Remote Repository:**
-   ```bash
-   # Push current branch and set upstream tracking:
-   git push -u origin feature/your-feature-name
-
-   # Or if working directly on the main branch:
-   git push origin main
-   ```
-
-6. **Pulling Collaborator Changes (Keeping Up to Date):**
-   ```bash
-   # Fetch and rebase to keep a clean commit history:
-   git fetch origin
-   git pull --rebase origin main
-   ```
-
----
-
-## 6. Key Files Quick Reference
-
-| File | Purpose |
-|------|---------|
-| [client/src/webrtc.js](file:///home/kali/Documents/project-beam/client/src/webrtc.js) | WebRTC connection lifecycle, DataChannel chunking, WS fallback, liveness, pause/resume |
-| [client/src/App.jsx](file:///home/kali/Documents/project-beam/client/src/App.jsx) | React application shell, room code input/display, status header, transfer strip |
-| [client/src/index.css](file:///home/kali/Documents/project-beam/client/src/index.css) | Brutalist monochrome theme tokens, progress bar styling, animations |
-| [server/src/main.rs](file:///home/kali/Documents/project-beam/server/src/main.rs) | Native Axum server, room manager, WebSocket framing, peer departure broadcast |
-| [server/Cargo.toml](file:///home/kali/Documents/project-beam/server/Cargo.toml) | Rust dependencies and release compiler optimizations (`lto = true`, `strip = true`) |
-| [.gitignore](file:///home/kali/Documents/project-beam/.gitignore) | Excludes node_modules, build targets, dist, logs, and sensitive files from git |
