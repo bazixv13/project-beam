@@ -3,15 +3,16 @@
 > **Notice to AI Agents:** You are assisting a contributor working on **Project BEAM** (an ultra-lean, high-throughput WebRTC & native Rust file transfer engine). Read this document carefully before proposing, modifying, or testing any code.
 > 
 > **Repository:** `https://github.com/bazixv13/project-beam`
+> **Development / Live Server:** `https://filetrans.duckdns.org/` (Auto-deployed on push to `main`)
 
 ---
 
 ## 1. Project Mission & Constraints
 
 - **Objective:** Maximum throughput, zero-bloat file transfer between browsers with 0ms room connection latency and high fault-tolerance.
-- **Production Environment:** Oracle Cloud Rocky Linux 9 instance (`1 GB RAM, 1 vCPU core`).
-- **Critical Resource Constraint:** Memory is severely constrained on production. The backend server must remain minimal (~1.5 MB RAM footprint) and never buffer entire files in memory. All streaming must be zero-copy or chunk-streamed in RAM.
-- **Public Endpoints:** `https://beam.hs.vc/` and `https://filetrans.duckdns.org/` (Served via Caddy reverse proxy to `127.0.0.1:3001`).
+- **Server Environment:** Oracle Cloud Rocky Linux 9 instance (`1 GB RAM, 1 vCPU core`).
+- **Critical Resource Constraint:** Memory is severely constrained on the server. The backend server must remain minimal (~1.5 MB RAM footprint) and never buffer entire files in memory. All streaming must be zero-copy or chunk-streamed in RAM.
+- **Continuous Deployment:** All commits merged or pushed to the `main` branch trigger an automated CI/CD pipeline via GitHub Actions that builds the frontend and Rust binary, deploys them to the server, and verifies the endpoint at `https://filetrans.duckdns.org/`. Manual deployment steps are not required.
 
 ---
 
@@ -19,6 +20,8 @@
 
 ```
 project-beam/
+├── .github/workflows/
+│   └── deploy.yml       # Automated CI/CD pipeline for development server
 ├── client/              # React 19 + Vite Frontend
 │   ├── src/
 │   │   ├── App.jsx      # UI layout, room orchestration, theme, transfer strips
@@ -81,7 +84,7 @@ npm run build
 # 2. Test Server Compilation
 cd ../server
 cargo check
-# Or build release binary:
+# Or test full release binary build:
 cargo build --release
 ```
 
@@ -97,7 +100,7 @@ If starting on a new machine:
 git clone https://github.com/bazixv13/project-beam.git
 cd project-beam
 ```
-If already cloned, ensure the branch is updated:
+If already cloned, ensure the local branch is up to date:
 ```bash
 git fetch origin
 git pull --rebase origin main
@@ -127,26 +130,11 @@ git commit -m "fix(webrtc): resolve issue Y"
 ```
 
 ### Step 5: Push Branch & Open Pull Request
-Push your branch to GitHub:
+Push the branch to GitHub:
 ```bash
 git push -u origin HEAD
 ```
-Then instruct the contributor to open a Pull Request at:
+Instruct the contributor to open a Pull Request at:
 `https://github.com/bazixv13/project-beam/pulls`
 
----
-
-## 6. Production Deployment Instructions (Reference)
-
-If authorized to deploy updates to the production server:
-
-```bash
-# Deploy Frontend Assets:
-cd client && npm run build
-scp -r dist/* oracle-rocky:/opt/p2p-beam/dist/
-
-# Deploy Backend Binary:
-cd ../server && cargo build --release
-scp target/release/p2p-server oracle-rocky:/opt/p2p-beam/p2p-server.new
-ssh oracle-rocky "mv /opt/p2p-beam/p2p-server.new /opt/p2p-beam/p2p-server && sudo systemctl restart p2p-beam.service"
-```
+Once reviewed and merged into `main`, the automated deployment workflow will automatically deploy the changes to `https://filetrans.duckdns.org/`.

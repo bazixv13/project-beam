@@ -2,10 +2,9 @@
 
 > Ultra-lean, zero-cloud peer-to-peer file transfer web application built with **React 19**, **WebRTC**, and a native **Rust (Axum)** signaling & relay engine.
 
-- **Primary URL:** [https://beam.hs.vc/](https://beam.hs.vc/)
-- **Fallback URL:** [https://filetrans.duckdns.org/](https://filetrans.duckdns.org/)
-- **WebSocket Endpoint:** `wss://beam.hs.vc/ws`
-- **Target Host:** Oracle Cloud Rocky Linux 9 instance (`ssh oracle-rocky`), 1 GB RAM, 1 vCPU.
+- **Development / Live Server:** [https://filetrans.duckdns.org/](https://filetrans.duckdns.org/) (Auto-deployed via CI/CD on push to `main`)
+- **Primary Endpoint:** [https://beam.hs.vc/](https://beam.hs.vc/)
+- **WebSocket Endpoint:** `wss://filetrans.duckdns.org/ws`
 
 ---
 
@@ -25,6 +24,8 @@
 
 ```
 project-beam/
+├── .github/workflows/
+│   └── deploy.yml       # Automated CI/CD deployment to https://filetrans.duckdns.org/
 ├── client/              # Frontend (React 19 + Vite)
 │   ├── src/
 │   │   ├── App.jsx      # UI, room orchestration, theme toggle, bidirectional transfers
@@ -38,7 +39,7 @@ project-beam/
 │   │   └── main.rs      # Axum WebSocket hub, room manager, departure broadcaster
 │   ├── Cargo.toml
 │   └── Cargo.lock
-├── AGENTS.md            # AI agent instructions, rules, and deployment guides
+├── AGENTS.md            # AI agent instructions, architectural rules, and contribution directions
 └── README.md
 ```
 
@@ -63,26 +64,12 @@ Runs the native signaling server on `http://127.0.0.1:3001` (WebSocket at `/ws`)
 
 ---
 
-## 📦 Building & Production Deployment
+## 🔄 Automated Deployment
 
-### Build Frontend
-```bash
-cd client
-npm run build
-```
+Deployments to the development server at [https://filetrans.duckdns.org/](https://filetrans.duckdns.org/) are fully automated via GitHub Actions (`.github/workflows/deploy.yml`).
 
-### Build Native Rust Server
-```bash
-cd server
-cargo build --release
-```
-
-### Deploy to Remote Production Server (`oracle-rocky`)
-```bash
-# 1. Deploy client assets
-scp -r client/dist/* oracle-rocky:/opt/p2p-beam/dist/
-
-# 2. Deploy binary & restart service
-scp server/target/release/p2p-server oracle-rocky:/opt/p2p-beam/p2p-server.new
-ssh oracle-rocky "mv /opt/p2p-beam/p2p-server.new /opt/p2p-beam/p2p-server && sudo systemctl restart p2p-beam.service"
-```
+Whenever changes are merged or pushed to the `main` branch, the pipeline:
+1. Builds the production frontend bundle (`client`).
+2. Compiles the native Rust release binary (`server`).
+3. Deploys the assets and binary over SSH to the server.
+4. Restarts `p2p-beam.service` and executes a health check against the live endpoint.

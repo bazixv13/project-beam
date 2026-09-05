@@ -1,0 +1,75 @@
+name: Deploy Development Server (filetrans.duckdns.org)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Build Frontend (Client)
+        run: |
+          cd client
+          npm ci
+          npm run build
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server -> target
+
+      - name: Build Native Backend Binary (Server)
+        run: |
+          cd server
+          cargo build --release
+
+      - name: Configure SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.REMOTE_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy Frontend Assets & Binary to Server
+        run: |
+          REMOTE="${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}"
+
+          # Upload static frontend assets
+          scp -i ~/.ssh/deploy_key -r client/dist/* "$REMOTE:/opt/p2p-beam/dist/"
+
+          # Upload compiled Rust binary atomically
+          scp -i ~/.ssh/deploy_key server/target/release/p2p-server "$REMOTE:/opt/p2p-beam/p2p-server.new"
+
+          # Replace binary and restart systemd service
+          ssh -i ~/.ssh/deploy_key "$REMOTE" "mv /opt/p2p-beam/p2p-server.new /opt/p2p-beam/p2p-server && chmod 0755 /opt/p2p-beam/p2p-server && sudo systemctl restart p2p-beam.service"
+
+      - name: Verify Live Deployment Endpoint
+        run: |
+          echo "Verifying deployment at https://filetrans.duckdns.org/ ..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://filetrans.duckdns.org/)
+          echo "HTTP Status: $STATUS"
+          if [ "$STATUS" -ne 200 ]; then
+            echo "Health check failed with status $STATUS"
+            exit 1
+          fi
+          echo "Successfully deployed and verified at https://filetrans.duckdns.org/"
