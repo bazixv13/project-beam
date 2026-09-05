@@ -64,6 +64,13 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 body {
@@ -110,14 +117,14 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.3 */
+     never changes width when swapping BEAM ↔ v1.3.4 */
   display: inline-grid;
   position: relative;
 }
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.3';
+  content: 'v1.3.4';
   visibility: hidden;
   height: 0;
   overflow: hidden;
