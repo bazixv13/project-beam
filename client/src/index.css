@@ -117,14 +117,14 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.5 */
+     never changes width when swapping BEAM ↔ v1.3.4 */
   display: inline-grid;
   position: relative;
 }
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.5';
+  content: 'v1.3.4';
   visibility: hidden;
   height: 0;
   overflow: hidden;
@@ -453,26 +453,16 @@ body {
   width: 100%;
 }
 
-.code-input-group {
+.input-group {
   position: relative;
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
 }
 
-.code-boxes {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex: 1;
-}
-
-.code-box {
-  flex: 1;
-  min-width: 0;
+.code-input {
+  width: 100%;
   height: 52px;
-  line-height: 52px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg-subtle);
@@ -480,43 +470,34 @@ body {
   font-family: var(--font-mono);
   font-size: 1.75rem;
   font-weight: 800;
-  letter-spacing: 0;
+  letter-spacing: 0.25em;
   text-align: center;
   text-transform: uppercase;
   outline: none;
   transition: border-color 0.15s ease, background-color 0.15s ease;
-  padding: 0;
-  margin: 0;
-  caret-color: var(--text-main);
+  padding: 0 44px;
 }
 
-.code-box::placeholder {
-  color: var(--text-faint);
-  opacity: 0.5;
-  font-weight: 600;
-}
-
-.code-box:focus {
+.code-input:focus {
   border-color: var(--border-focus);
 }
 
 .camera-btn {
-  width: 52px;
-  height: 52px;
-  flex-shrink: 0;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-subtle);
+  position: absolute;
+  right: 8px;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+  border-radius: 8px;
 }
 
 .camera-btn:hover {
-  border-color: var(--border-focus);
   color: var(--text-main);
 }
 
