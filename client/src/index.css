@@ -117,14 +117,14 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.4 */
+     never changes width when swapping BEAM ↔ v1.3.5 */
   display: inline-grid;
   position: relative;
 }
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.4';
+  content: 'v1.3.5';
   visibility: hidden;
   height: 0;
   overflow: hidden;
@@ -471,11 +471,19 @@ body {
   font-size: 1.75rem;
   font-weight: 800;
   letter-spacing: 0.25em;
+  text-indent: 0.25em;
   text-align: center;
   text-transform: uppercase;
   outline: none;
   transition: border-color 0.15s ease, background-color 0.15s ease;
-  padding: 0 44px;
+  padding: 0 44px 5px;
+}
+
+.code-input::placeholder {
+  color: var(--text-faint);
+  opacity: 0.5;
+  letter-spacing: 0.25em;
+  text-indent: 0.25em;
 }
 
 .code-input:focus {
@@ -485,6 +493,8 @@ body {
 .camera-btn {
   position: absolute;
   right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 36px;
   height: 36px;
   border: none;
