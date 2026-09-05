@@ -1,13 +1,13 @@
-name: Deploy Development Server (filetrans.duckdns.org)
+name: Deploy Production Server (beam.hs.vc)
 
 on:
   push:
     branches:
-      - develop
+      - main
   workflow_dispatch:
 
 concurrency:
-  group: deploy-dev
+  group: deploy-prod
   cancel-in-progress: false
 
 jobs:
@@ -65,11 +65,11 @@ jobs:
 
       - name: Verify Live Deployment Endpoint
         run: |
-          echo "Verifying deployment at https://filetrans.duckdns.org/ ..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://filetrans.duckdns.org/)
+          echo "Verifying deployment at https://beam.hs.vc/ ..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://beam.hs.vc/)
           echo "HTTP Status: $STATUS"
           if [ "$STATUS" -ne 200 ]; then
             echo "Health check failed with status $STATUS"
             exit 1
           fi
-          echo "Successfully deployed and verified at https://filetrans.duckdns.org/"
+          echo "Successfully deployed and verified at https://beam.hs.vc/"
