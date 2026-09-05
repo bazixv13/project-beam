@@ -1,6 +1,8 @@
 # AGENTS.md — AI Instructions for Project BEAM
 
-> **Notice to AI Agents:** You are assisting a developer working on **Project BEAM** (an ultra-lean, high-throughput WebRTC & native Rust file transfer engine). Read this document carefully before proposing, modifying, or testing any code.
+> **Notice to AI Agents:** You are assisting a contributor working on **Project BEAM** (an ultra-lean, high-throughput WebRTC & native Rust file transfer engine). Read this document carefully before proposing, modifying, or testing any code.
+> 
+> **Repository:** `https://github.com/bazixv13/project-beam`
 
 ---
 
@@ -66,9 +68,9 @@ When modifying this repository, AI agents must strictly follow these invariants:
 
 ---
 
-## 4. Local Build & Test Commands
+## 4. Local Build & Test Verification
 
-Before committing any changes, the AI agent must ensure both components compile cleanly:
+Before proposing or committing any changes, the AI agent must verify that both components build cleanly:
 
 ```bash
 # 1. Test Client Build
@@ -85,43 +87,58 @@ cargo build --release
 
 ---
 
-## 5. Directions for AI Agents to Commit & Push Changes
+## 5. Directions for AI Agents: How to Contribute & Push Changes
 
-When you (the AI agent) have finished implementing and verifying code changes for the contributor, execute or instruct the contributor to execute the following Git workflow:
+When you (the AI agent) have finished implementing and verifying code changes for the contributor, follow these step-by-step Git instructions:
 
-### Step 1: Verify Status
-Ensure no temporary, debug, or build output files (`dist/`, `target/`, `node_modules/`, `*.log`) are being tracked:
+### Step 1: Clone or Pull the Latest Main
+If starting on a new machine:
+```bash
+git clone https://github.com/bazixv13/project-beam.git
+cd project-beam
+```
+If already cloned, ensure the branch is updated:
+```bash
+git fetch origin
+git pull --rebase origin main
+```
+
+### Step 2: Create a Dedicated Branch
+Always make modifications on a feature or fix branch:
+```bash
+git checkout -b feature/<descriptive-name>
+# or
+git checkout -b fix/<bug-description>
+```
+
+### Step 3: Verify Status & Cleanliness
+Ensure no unwanted build artifacts (`dist/`, `target/`, `node_modules/`, `*.log`) are staged:
 ```bash
 git status
 ```
 
-### Step 2: Stage Modified Files
-Stage the intentional changes cleanly:
+### Step 4: Stage & Commit Changes
+Stage files cleanly and write a concise, conventional commit message:
 ```bash
 git add client/ server/ README.md
+git commit -m "feat(transfer): add support for X"
+# or
+git commit -m "fix(webrtc): resolve issue Y"
 ```
 
-### Step 3: Format Commit Message
-Write a clear, conventional commit message describing the exact bugfix or feature:
+### Step 5: Push Branch & Open Pull Request
+Push your branch to GitHub:
 ```bash
-git commit -m "fix(transfer): description of changes made"
+git push -u origin HEAD
 ```
-
-### Step 4: Push to Remote
-Push the branch to the shared repository:
-```bash
-# If on a feature branch:
-git push origin <branch-name>
-
-# If on main:
-git push origin main
-```
+Then instruct the contributor to open a Pull Request at:
+`https://github.com/bazixv13/project-beam/pulls`
 
 ---
 
 ## 6. Production Deployment Instructions (Reference)
 
-If the contributor instructs you to deploy updates to the production server:
+If authorized to deploy updates to the production server:
 
 ```bash
 # Deploy Frontend Assets:
