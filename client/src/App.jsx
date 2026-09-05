@@ -172,7 +172,7 @@ function BrandTitle() {
     if (revertTimer.current) clearTimeout(revertTimer.current);
     revertTimer.current = setTimeout(() => {
       setShowVersion(false);
-    }, 10000);
+    }, 4000);
   };
 
   const handleMouseLeave = () => {

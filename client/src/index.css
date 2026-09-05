@@ -107,35 +107,33 @@ body {
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--text-main);
-  position: relative;
-  display: inline-block;
-  /* wide enough to not reflow when switching between BEAM / v1.3.1 */
-  min-width: 4.5ch;
   cursor: default;
   user-select: none;
+  /* grid trick: ::after holds the wider string invisibly so the wrapper
+     never changes width when swapping BEAM ↔ v1.3.1 */
+  display: inline-grid;
+  position: relative;
+}
+
+/* invisible width-holder — set to whichever string is wider */
+.brand-title::after {
+  content: 'v1.3.1';
+  visibility: hidden;
+  height: 0;
+  overflow: hidden;
+  grid-area: 1 / 1;
+  white-space: nowrap;
 }
 
 .brand-title__beam,
 .brand-title__version {
-  display: block;
-  position: absolute;
-  top: 0;
-  left: 0;
+  grid-area: 1 / 1;
   white-space: nowrap;
   transition: opacity 0.35s ease;
-  line-height: inherit;
-}
-
-/* keep the element's height equal to the text */
-.brand-title__beam {
-  position: relative;
 }
 
 .brand-title__version {
   opacity: 0;
-  pointer-events: none;
-  font-size: 0.95rem;
-  letter-spacing: 0.06em;
 }
 
 .brand-title--version .brand-title__beam {
