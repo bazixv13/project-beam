@@ -15,6 +15,16 @@ const ICE_SERVERS = [
       'stun:stun.cloudflare.com:3478',
       'stun:stun.services.mozilla.com'
     ]
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
   }
 ];
 
