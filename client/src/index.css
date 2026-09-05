@@ -107,6 +107,43 @@ body {
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--text-main);
+  position: relative;
+  display: inline-block;
+  /* wide enough to not reflow when switching between BEAM / v1.3.1 */
+  min-width: 4.5ch;
+  cursor: default;
+  user-select: none;
+}
+
+.brand-title__beam,
+.brand-title__version {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  transition: opacity 0.35s ease;
+  line-height: inherit;
+}
+
+/* keep the element's height equal to the text */
+.brand-title__beam {
+  position: relative;
+}
+
+.brand-title__version {
+  opacity: 0;
+  pointer-events: none;
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+}
+
+.brand-title--version .brand-title__beam {
+  opacity: 0;
+}
+
+.brand-title--version .brand-title__version {
+  opacity: 1;
 }
 
 .mode-badge-wrapper {

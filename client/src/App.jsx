@@ -161,6 +161,40 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
+const APP_VERSION = 'v1.3.1';
+
+function BrandTitle() {
+  const [showVersion, setShowVersion] = useState(false);
+  const revertTimer = useRef(null);
+
+  const handleMouseEnter = () => {
+    setShowVersion(true);
+    if (revertTimer.current) clearTimeout(revertTimer.current);
+    revertTimer.current = setTimeout(() => {
+      setShowVersion(false);
+    }, 10000);
+  };
+
+  const handleMouseLeave = () => {
+    if (revertTimer.current) clearTimeout(revertTimer.current);
+    setShowVersion(false);
+  };
+
+  useEffect(() => () => { if (revertTimer.current) clearTimeout(revertTimer.current); }, []);
+
+  return (
+    <span
+      className={`brand-title${showVersion ? ' brand-title--version' : ''}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      aria-label={showVersion ? APP_VERSION : 'BEAM'}
+    >
+      <span className="brand-title__beam">BEAM</span>
+      <span className="brand-title__version">{APP_VERSION}</span>
+    </span>
+  );
+}
+
 function App() {
   const [initialRoom] = useState(getInitialRoomState);
   const [roomId, setRoomId] = useState(initialRoom.roomId);
@@ -669,7 +703,7 @@ function App() {
       {/* Brutalist Top Header */}
       <header className="app-header">
         <div className="brand">
-          <span className="brand-title">BEAM</span>
+          <BrandTitle />
           {inRoom && connectionState === 'connected' && (
             <div className={`mode-badge-wrapper ${transferMode}`} tabIndex={0}>
               <span className="mode-indicator">

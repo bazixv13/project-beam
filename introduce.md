@@ -20,8 +20,17 @@ git fetch origin && git pull --rebase origin main
 
 ---
 
-## What This Project Is
+## Current Version
 
+```
+1.3.1
+```
+
+**Agents: whenever you make a meaningful change, bump this version** (`MAJOR.MINOR.PATCH`) **and update the `APP_VERSION` constant in `client/src/App.jsx`** so the in-app hover tooltip stays in sync.
+
+---
+
+## What This Project Is
 BEAM is a browser-based peer-to-peer file transfer app. Two browsers connect via a 2-character room code and transfer files directly (WebRTC) or through a WebSocket relay if firewalls block direct connections.
 
 - **Frontend:** React 19 + Vite — `client/`
