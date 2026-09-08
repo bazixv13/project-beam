@@ -5,9 +5,10 @@ const BLOCK_SIZE = 4 * 1024 * 1024; // 4MB read blocks
 const BATCH_FLUSH_SIZE = 16 * 1024 * 1024; // 16MB Blob flush
 
 // Liveness tuning: real drops surface instantly via socket onclose / user-left,
-// so the silence timer only governs *silent* deaths. 30s base forgives mobile
-// background throttling; 120s while the peer announced an open file picker.
-const PEER_SILENCE_TIMEOUT = 30000;
+// so the silence timer only governs *silent* deaths. 10s base keeps the UI
+// honest about ghosts without false-positiving brief mobile stalls; 120s
+// while the peer announced an open file picker (peer-busy).
+const PEER_SILENCE_TIMEOUT = 10000;
 const PEER_BUSY_GRACE = 120000;
 
 const ICE_SERVERS = [
