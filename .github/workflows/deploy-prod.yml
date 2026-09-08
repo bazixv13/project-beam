@@ -11,7 +11,50 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  # Figure out which side changed so single-side pushes skip the other build.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      client: ${{ steps.filter.outputs.client }}
+      server: ${{ steps.filter.outputs.server }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed areas
+        id: filter
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [[ -z "$BEFORE" || "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+            echo "client=true" >> "$GITHUB_OUTPUT"
+            echo "server=true" >> "$GITHUB_OUTPUT"
+            echo "First push or manual run: building everything"
+          else
+            FILES=$(git diff --name-only "$BEFORE" "$GITHUB_SHA" || true)
+            echo "$FILES"
+            if echo "$FILES" | grep -q '^\.github/workflows/'; then
+              # Workflow itself changed: build everything to validate the pipeline
+              echo "client=true" >> "$GITHUB_OUTPUT"
+              echo "server=true" >> "$GITHUB_OUTPUT"
+            else
+              if echo "$FILES" | grep -q '^client/'; then
+                echo "client=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "client=false" >> "$GITHUB_OUTPUT"
+              fi
+              if echo "$FILES" | grep -q '^server/'; then
+                echo "server=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "server=false" >> "$GITHUB_OUTPUT"
+              fi
+            fi
+          fi
+
+  build-frontend:
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -30,6 +73,21 @@ jobs:
           npm ci
           npm run build
 
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: client/dist
+          retention-days: 1
+
+  build-backend:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -38,10 +96,38 @@ jobs:
         with:
           workspaces: server -> target
 
+      # Production keeps the max-optimized [profile.release]
+      # (fat LTO, single codegen unit) for the smallest binary.
       - name: Build Native Backend Binary (Server)
         run: |
           cd server
           cargo build --release
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-binary
+          path: server/target/release/p2p-server
+          retention-days: 1
+
+  deploy:
+    needs: [changes, build-frontend, build-backend]
+    if: always() && (needs.build-frontend.result == 'success' || needs.build-backend.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download frontend artifact
+        if: needs.build-frontend.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend-dist
+
+      - name: Download backend artifact
+        if: needs.build-backend.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-binary
+          path: backend-binary
 
       - name: Configure SSH Key
         run: |
@@ -53,15 +139,30 @@ jobs:
       - name: Deploy Frontend Assets & Binary to Server
         run: |
           REMOTE="${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}"
+          NEED_RESTART=0
 
-          # Upload static frontend assets
-          scp -i ~/.ssh/deploy_key -r client/dist/* "$REMOTE:/opt/p2p-beam/dist/"
+          if [ -d frontend-dist ]; then
+            # Upload static frontend assets (no restart needed)
+            scp -i ~/.ssh/deploy_key -r frontend-dist/* "$REMOTE:/opt/p2p-beam/dist/"
+            echo "Frontend assets deployed"
+          else
+            echo "Frontend unchanged, skipping"
+          fi
 
-          # Upload compiled Rust binary atomically
-          scp -i ~/.ssh/deploy_key server/target/release/p2p-server "$REMOTE:/opt/p2p-beam/p2p-server.new"
+          if [ -f backend-binary/p2p-server ]; then
+            # Upload compiled Rust binary atomically
+            scp -i ~/.ssh/deploy_key backend-binary/p2p-server "$REMOTE:/opt/p2p-beam/p2p-server.new"
+            NEED_RESTART=1
+            echo "Backend binary uploaded"
+          else
+            echo "Backend unchanged, skipping"
+          fi
 
-          # Replace binary and restart systemd service
-          ssh -i ~/.ssh/deploy_key "$REMOTE" "mv /opt/p2p-beam/p2p-server.new /opt/p2p-beam/p2p-server && chmod 0755 /opt/p2p-beam/p2p-server && sudo systemctl restart p2p-beam.service"
+          # Replace binary and restart systemd service only when it changed
+          if [ "$NEED_RESTART" = "1" ]; then
+            ssh -i ~/.ssh/deploy_key "$REMOTE" "mv /opt/p2p-beam/p2p-server.new /opt/p2p-beam/p2p-server && chmod 0755 /opt/p2p-beam/p2p-server && sudo systemctl restart p2p-beam.service"
+            echo "Service restarted"
+          fi
 
       - name: Verify Live Deployment Endpoint
         run: |
