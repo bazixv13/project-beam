@@ -179,15 +179,22 @@ impl RoomManager {
     }
 
     fn leave_all_rooms(&self, conn_id: usize) {
+        // Collect first, notify after: DashMap shard locks are NOT
+        // re-entrant, so rooms.get() inside rooms.retain() deadlocks the
+        // (single) runtime thread and hangs the whole server.
+        let mut left = Vec::new();
         self.rooms.retain(|room_id, peers| {
             let before = peers.len();
             peers.retain(|(id, _)| *id != conn_id);
             if peers.len() < before {
                 println!("[ROOM] Client #{} left room {}", conn_id, room_id);
-                self.notify_leave(room_id, conn_id);
+                left.push(room_id.clone());
             }
             !peers.is_empty()
         });
+        for room_id in left {
+            self.notify_leave(&room_id, conn_id);
+        }
         // Explicit leave ends any picker-busy state for this connection.
         self.room_busy.retain(|_, busy_id| *busy_id != conn_id);
     }
