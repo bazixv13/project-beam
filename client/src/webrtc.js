@@ -103,6 +103,7 @@ export class WebRTCConnection {
     this.peerBusy = false;
     // selfPicking: local native file picker open (own timers may be frozen)
     this.selfPicking = false;
+    this.pickerOpenSince = 0;
 
     const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.origin === 'http://localhost:5173' ? 'localhost:3001' : window.location.host;
@@ -225,6 +226,15 @@ export class WebRTCConnection {
       console.warn('[WS] Socket closed code:', evt.code);
       this.onOffline(true);
       if (this.isConnected) {
+        if (this.selfPicking) {
+          // Native picker open: the OS likely suspended our socket. Do NOT
+          // tear down the session (that would unmount the open picker's
+          // <input> and cancel the dialog). Just reconnect quietly; the
+          // server + remote peer give us an extended grace via peer-busy.
+          console.log('[WS] Socket lost while picker open, reconnecting quietly');
+          this.scheduleWsReconnect();
+          return;
+        }
         console.log('[WS] Disconnected from peer due to socket closure');
         this.handlePeerLeft();
       }
@@ -248,6 +258,8 @@ export class WebRTCConnection {
           case 'user-joined':
             console.log('[P2P] Peer joined room:', msg);
             this.remotePeerId = msg.sender;
+            // Fresh sign of life: any pending busy state is stale.
+            this.peerBusy = false;
             if (msg.initiator !== undefined) {
               this.isInitiator = msg.initiator;
             }
@@ -384,19 +396,23 @@ export class WebRTCConnection {
   // Native file picker presence: call before input.click() and when the
   // picker resolves (change / cancel / window focus). Keeps the remote peer
   // from timing us out while our JS timers are frozen by the OS picker.
+  // Always sent over the WS relay (never DataChannel) so the signaling
+  // server also sees it and extends its leave-notice grace for our room.
   notifyPickerOpen() {
     this.selfPicking = true;
-    this.sendControl('peer-busy');
+    this.pickerOpenSince = Date.now();
+    this.sendWs('peer-busy');
   }
 
   notifyPickerClosed() {
     if (this.selfPicking) {
       this.selfPicking = false;
+      this.pickerOpenSince = 0;
       // Timers may have been frozen for a while; re-baseline so we don't
       // instantly false-timeout the peer on resume.
       this.lastPeerHeartbeat = Date.now();
     }
-    this.sendControl('peer-back');
+    this.sendWs('peer-back');
   }
 
   handleControlMessage(rawString) {
@@ -588,7 +604,8 @@ export class WebRTCConnection {
       if (!this.isConnected || this.isClosed) return;
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       // Own picker open: own timers may be frozen; baseline resets on close.
-      if (this.selfPicking) return;
+      // Capped so a stuck flag can't pin us to a dead room forever.
+      if (this.selfPicking && (Date.now() - (this.pickerOpenSince || 0)) < PEER_BUSY_GRACE) return;
 
       // If actively transferring and WebSocket is open, avoid false peer disconnects
       if (this.isSending || this.receiveFileId) {
