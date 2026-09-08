@@ -161,7 +161,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.7';
+const APP_VERSION = 'v1.3.8';
 
 function BrandTitle() {
   const [showVersion, setShowVersion] = useState(false);
@@ -1055,26 +1055,33 @@ function App() {
               </div>
             )}
 
-            <input 
-              id="fileInput" 
-              type="file" 
-              multiple 
-              style={{ display: 'none' }} 
-              onChange={handleFileSelect} 
-              onCancel={closeFilePicker}
-            />
-            <input 
-              id="folderInput" 
-              type="file" 
-              webkitdirectory="true" 
-              directory="true" 
-              style={{ display: 'none' }} 
-              onChange={handleFolderSelect} 
-              onCancel={closeFilePicker}
-            />
           </div>
         )}
       </main>
+      {/*
+        Hidden file inputs live at the App root, outside every
+        connection-state conditional. Unmounting an <input type=file>
+        while its native picker dialog is open cancels the dialog,
+        which is exactly what used to eat the selection whenever the
+        socket blipped during picking on phones.
+      */}
+      <input
+        id="fileInput"
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={handleFileSelect}
+        onCancel={closeFilePicker}
+      />
+      <input
+        id="folderInput"
+        type="file"
+        webkitdirectory="true"
+        directory="true"
+        style={{ display: 'none' }}
+        onChange={handleFolderSelect}
+        onCancel={closeFilePicker}
+      />
     </div>
   );
 }
