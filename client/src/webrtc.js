@@ -4,6 +4,12 @@ const BUFFER_LOW = 256 * 1024; // 256KB low watermark
 const BLOCK_SIZE = 4 * 1024 * 1024; // 4MB read blocks
 const BATCH_FLUSH_SIZE = 16 * 1024 * 1024; // 16MB Blob flush
 
+// Liveness tuning: real drops surface instantly via socket onclose / user-left,
+// so the silence timer only governs *silent* deaths. 30s base forgives mobile
+// background throttling; 120s while the peer announced an open file picker.
+const PEER_SILENCE_TIMEOUT = 30000;
+const PEER_BUSY_GRACE = 120000;
+
 const ICE_SERVERS = [
   {
     urls: [
@@ -93,6 +99,10 @@ export class WebRTCConnection {
     this.heartbeatSendTimer = null;
     this.heartbeatCheckTimer = null;
     this.lastPeerHeartbeat = Date.now();
+    // peerBusy: remote peer announced an open native file picker (timers frozen there)
+    this.peerBusy = false;
+    // selfPicking: local native file picker open (own timers may be frozen)
+    this.selfPicking = false;
 
     const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.origin === 'http://localhost:5173' ? 'localhost:3001' : window.location.host;
@@ -371,6 +381,24 @@ export class WebRTCConnection {
     this.sendWs(type, payload);
   }
 
+  // Native file picker presence: call before input.click() and when the
+  // picker resolves (change / cancel / window focus). Keeps the remote peer
+  // from timing us out while our JS timers are frozen by the OS picker.
+  notifyPickerOpen() {
+    this.selfPicking = true;
+    this.sendControl('peer-busy');
+  }
+
+  notifyPickerClosed() {
+    if (this.selfPicking) {
+      this.selfPicking = false;
+      // Timers may have been frozen for a while; re-baseline so we don't
+      // instantly false-timeout the peer on resume.
+      this.lastPeerHeartbeat = Date.now();
+    }
+    this.sendControl('peer-back');
+  }
+
   handleControlMessage(rawString) {
     this.lastPeerHeartbeat = Date.now();
     let msg;
@@ -438,6 +466,17 @@ export class WebRTCConnection {
         break;
 
       case 'heartbeat':
+        this.lastPeerHeartbeat = Date.now();
+        break;
+
+      case 'peer-busy':
+        // Remote peer opened a native file picker: its heartbeat timers may
+        // freeze, so extend its silence allowance instead of timing it out.
+        this.peerBusy = true;
+        break;
+
+      case 'peer-back':
+        this.peerBusy = false;
         this.lastPeerHeartbeat = Date.now();
         break;
     }
@@ -548,6 +587,8 @@ export class WebRTCConnection {
     this.heartbeatCheckTimer = setInterval(() => {
       if (!this.isConnected || this.isClosed) return;
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      // Own picker open: own timers may be frozen; baseline resets on close.
+      if (this.selfPicking) return;
 
       // If actively transferring and WebSocket is open, avoid false peer disconnects
       if (this.isSending || this.receiveFileId) {
@@ -556,9 +597,11 @@ export class WebRTCConnection {
         }
       }
 
+      const limit = this.peerBusy ? PEER_BUSY_GRACE : PEER_SILENCE_TIMEOUT;
       const silence = Date.now() - (this.lastPeerHeartbeat || 0);
-      if (silence > 12000) {
-        console.warn('[P2P] Peer silence timeout (12s) — treating as disconnected');
+      if (silence > limit) {
+        console.warn(`[P2P] Peer silence timeout (${Math.round(limit / 1000)}s) — treating as disconnected`);
+        this.peerBusy = false;
         this.stopHeartbeat();
         this.handlePeerLeft();
       }
@@ -626,6 +669,7 @@ export class WebRTCConnection {
     this.isConnected = false;
     this.mode = 'ws';
     this.pendingUpgrade = false;
+    this.peerBusy = false;
     this.setHandshaking(false);
     if (this.dataChannel) {
       try {

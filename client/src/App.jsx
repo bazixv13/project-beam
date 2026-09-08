@@ -161,7 +161,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.6';
+const APP_VERSION = 'v1.3.7';
 
 function BrandTitle() {
   const [showVersion, setShowVersion] = useState(false);
@@ -246,6 +246,7 @@ function App() {
   const webrtc = useRef(null);
   const sendTimerRef = useRef(null);
   const receiveTimerRef = useRef(null);
+  const wakeLockRef = useRef(null);
 
   const t = dict[lang] || dict.en;
 
@@ -274,6 +275,40 @@ function App() {
       window.removeEventListener('pagehide', handleUnload);
     };
   }, []);
+
+  // Keep the screen (and its timers/sockets) alive while connected.
+  // Helps against screen-off suspends on phones; the peer-busy signal
+  // covers the native file picker overlay itself.
+  useEffect(() => {
+    if (connectionState !== 'connected') return;
+    if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) return;
+    let lock = null;
+    let cancelled = false;
+    const request = async () => {
+      try {
+        const sentinel = await navigator.wakeLock.request('screen');
+        if (cancelled) {
+          try { await sentinel.release(); } catch (_) {}
+          return;
+        }
+        lock = sentinel;
+        wakeLockRef.current = sentinel;
+      } catch (_) {}
+    };
+    request();
+    const reRequest = () => {
+      if (document.visibilityState === 'visible' && !cancelled) request();
+    };
+    document.addEventListener('visibilitychange', reRequest);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', reRequest);
+      if (lock) {
+        try { lock.release(); } catch (_) {}
+      }
+      wakeLockRef.current = null;
+    };
+  }, [connectionState]);
 
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
@@ -500,6 +535,7 @@ function App() {
   };
 
   const handleFileSelect = async (e) => {
+    closeFilePicker();
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
     setSendProgress({
@@ -528,6 +564,7 @@ function App() {
   };
 
   const handleFolderSelect = async (e) => {
+    closeFilePicker();
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
     setSendProgress({
@@ -559,6 +596,31 @@ function App() {
     if (selectedFile && webrtc.current) {
       webrtc.current.sendFile(selectedFile);
     }
+  };
+
+  // Announce the native file picker to the peer *before* it opens so the
+  // peer extends our silence allowance while OS picker freezes our timers.
+  // closeFilePicker runs on change, cancel, and window-focus fallback.
+  const openFilePicker = (inputId) => {
+    if (webrtc.current) webrtc.current.notifyPickerOpen();
+    const onFocusBack = () => {
+      window.removeEventListener('focus', onFocusBack);
+      setTimeout(() => {
+        if (webrtc.current) webrtc.current.notifyPickerClosed();
+      }, 500);
+    };
+    window.addEventListener('focus', onFocusBack);
+    setTimeout(() => window.removeEventListener('focus', onFocusBack), 180000);
+    const el = document.getElementById(inputId);
+    if (el) {
+      el.click();
+    } else {
+      if (webrtc.current) webrtc.current.notifyPickerClosed();
+    }
+  };
+
+  const closeFilePicker = () => {
+    if (webrtc.current) webrtc.current.notifyPickerClosed();
   };
 
   const handleCancelFile = () => {
@@ -971,7 +1033,7 @@ function App() {
                   <button 
                     type="button" 
                     className="btn-trigger"
-                    onClick={() => document.getElementById('fileInput').click()}
+                    onClick={() => openFilePicker('fileInput')}
                   >
                     <FileUp size={22} />
                     <span>{t.selectFile}</span>
@@ -982,7 +1044,7 @@ function App() {
                   <button 
                     type="button" 
                     className="btn-trigger"
-                    onClick={() => document.getElementById('folderInput').click()}
+                    onClick={() => openFilePicker('folderInput')}
                   >
                     <FolderUp size={22} />
                     <span>{t.selectFolder}</span>
@@ -999,6 +1061,7 @@ function App() {
               multiple 
               style={{ display: 'none' }} 
               onChange={handleFileSelect} 
+              onCancel={closeFilePicker}
             />
             <input 
               id="folderInput" 
@@ -1007,6 +1070,7 @@ function App() {
               directory="true" 
               style={{ display: 'none' }} 
               onChange={handleFolderSelect} 
+              onCancel={closeFilePicker}
             />
           </div>
         )}

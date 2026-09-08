@@ -20,3 +20,12 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Fast-link profile for dev CI deploys (deploy.yml builds with
+# `cargo build --profile dev-release`). Same opts, thin LTO + parallel
+# codegen so cache-miss builds finish much sooner. Production keeps
+# [profile.release] above for maximum size optimization.
+[profile.dev-release]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
