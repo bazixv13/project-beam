@@ -43,7 +43,8 @@ const dict = {
     p2pDesc: 'Files transfer directly between devices without touching the server. Fully end-to-end encrypted (DTLS).',
     fallbackTitle: 'Relay Fallback (WebSocket)',
     fallbackDesc: 'Direct P2P was blocked by firewalls or NAT. Data streams safely in RAM through the encrypted server and is never stored.',
-    handshakingP2p: 'Negotiating direct P2P upgrade…'
+    handshakingP2p: 'Negotiating direct P2P upgrade…',
+    sharedReady: 'Shared file ready — join a room to send it'
   },
   pl: {
     title: 'Beam',
@@ -80,7 +81,8 @@ const dict = {
     p2pDesc: 'Pliki przesyłane są bezpośrednio między urządzeniami bez udziału serwera. Szyfrowanie end-to-end (DTLS).',
     fallbackTitle: 'Przekaźnik Fallback (WebSocket)',
     fallbackDesc: 'Połączenie P2P zostało zablokowane przez zaporę lub NAT. Dane są bezpiecznie przesyłane w pamięci RAM serwera i nie są zapisywane.',
-    handshakingP2p: 'Negocjowanie bezpośredniego P2P…'
+    handshakingP2p: 'Negocjowanie bezpośredniego P2P…',
+    sharedReady: 'Udostępniony plik gotowy — dołącz do pokoju, aby go wysłać'
   }
 };
 
@@ -161,7 +163,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.9';
+const APP_VERSION = 'v1.3.10';
 
 function BrandTitle() {
   const [showVersion, setShowVersion] = useState(false);
@@ -741,6 +743,64 @@ function App() {
 
   const inRoom = connectionState !== 'disconnected';
 
+  // Web Share Target: pick up files shared from the Android share sheet.
+  // The service worker stashes them in IndexedDB ('beam-share') and redirects
+  // here with ?share-target. We stage them on the home screen so the user
+  // just creates/joins a room and hits Send. Runs once on mount.
+  useEffect(() => {
+    if (!window.location.search.includes('share-target')) return;
+    // Strip the marker immediately so refresh/back doesn't re-trigger.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('share-target');
+      const rest = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    } catch (_) {}
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const files = await new Promise((resolve, reject) => {
+          const req = indexedDB.open('beam-share', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('files');
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('files', 'readwrite');
+            const store = tx.objectStore('files');
+            const get = store.get('shared-files');
+            get.onsuccess = () => {
+              store.delete('shared-files');
+              resolve(get.result || []);
+            };
+            get.onerror = () => reject(get.error);
+            tx.oncomplete = () => db.close();
+          };
+          req.onerror = () => reject(req.error);
+        });
+        if (cancelled || !files || files.length === 0) return;
+        const valid = files.filter((f) => f && typeof f.name === 'string' && f.size > 0);
+        if (valid.length === 0) return;
+        setSendProgress({
+          active: false,
+          paused: false,
+          completed: false,
+          fileName: '',
+          fileSize: 0,
+          bytesTransferred: 0,
+          percent: 0,
+          speed: 0,
+          eta: 0
+        });
+        if (valid.length === 1) {
+          setSelectedFile(valid[0]);
+        } else {
+          zipFilesAndSetState(valid.map((file) => ({ file, path: file.name })), 'shared-files.zip');
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div 
       className={`app-shell ${isDragging ? 'is-dragging' : ''}`}
@@ -844,6 +904,38 @@ function App() {
         {/* Disconnected: Simple clean 2-char code connection */}
         {connectionState === 'disconnected' && (
           <div className="view-flow">
+            {/* File shared from the Android share sheet — staged, waiting for a room */}
+            {selectedFile && !sendProgress.active && !isZipping && (
+              <div className="staged-file">
+                <div className="staged-details">
+                  <div className="staged-title-row">
+                    <p className="staged-name">{selectedFile.name}</p>
+                  </div>
+                  <p className="staged-meta">
+                    {formatSize(selectedFile.size)} • {t.sharedReady}
+                  </p>
+                </div>
+                <div className="staged-buttons">
+                  <button className="btn-icon" onClick={handleCancelFile} title={t.cancel}>
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Shared multi-file zip being compressed */}
+            {isZipping && (
+              <div className="transfer-strip zipping">
+                <div className="strip-info">
+                  <span className="strip-type">{t.zipping}</span>
+                  <span className="strip-title">{zipProgress}%</span>
+                </div>
+                <div className="meter-track">
+                  <div className="meter-fill" style={{ width: `${zipProgress}%` }} />
+                </div>
+              </div>
+            )}
+
             <button onClick={handleCreateRoom} className="btn-solid">
               <span>{t.createRoom}</span>
             </button>
