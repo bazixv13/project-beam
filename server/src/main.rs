@@ -1,16 +1,18 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
-    response::Response,
-    routing::get,
+    http::{header, HeaderValue, StatusCode},
+    response::{Redirect, Response},
+    routing::{get, get_service},
     Router,
 };
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     net::SocketAddr,
     path::PathBuf,
     sync::{
@@ -23,6 +25,7 @@ use tower_http::{
     compression::CompressionLayer,
     cors::{Any, CorsLayer},
     services::ServeDir,
+    set_header::SetResponseHeaderLayer,
 };
 
 static NEXT_CONN_ID: AtomicUsize = AtomicUsize::new(1);
@@ -36,7 +39,15 @@ const LEAVE_GRACE_NORMAL_SECS: u64 = 5;
 // picker resolves and the OS unsuspends the tab.
 const LEAVE_GRACE_BUSY_SECS: u64 = 150;
 
-type PeerSender = mpsc::UnboundedSender<Message>;
+// Bound on queued outbound messages per peer. 64 slots x 64KB relay chunks
+// caps a stalled peer's backlog at ~4MB instead of growing without limit:
+// with an unbounded channel a fast sender + slow/dead receiver OOMs the
+// 1GB box. A full queue applies backpressure to the sender's read loop
+// rather than dropping — relay chunks have no retransmission, so loss is
+// not an option.
+const PEER_CHANNEL_CAPACITY: usize = 64;
+
+type PeerSender = mpsc::Sender<Message>;
 
 struct RoomManager {
     // Map of roomId -> list of (conn_id, sender)
@@ -53,7 +64,7 @@ impl RoomManager {
         }
     }
 
-    fn join_room(&self, room_id: &str, conn_id: usize, sender: PeerSender) {
+    async fn join_room(&self, room_id: &str, conn_id: usize, sender: PeerSender) {
         println!("[ROOM] Client #{} joining room: {}", conn_id, room_id);
         let mut entry = self.rooms.entry(room_id.to_string()).or_default();
         entry.retain(|(id, tx)| *id != conn_id && !tx.is_closed());
@@ -84,7 +95,9 @@ impl RoomManager {
                 "initiator": true
             }).to_string();
             println!("[NOTIFY] Notifying existing peer #{} that peer #{} joined room {}", other_id, conn_id, room_id);
-            let _ = other_tx.send(Message::Text(msg_for_existing));
+            // Bounded send: awaits queue space, so a backpressured peer
+            // throttles the joiner instead of queueing without limit.
+            let _ = other_tx.send(Message::Text(msg_for_existing)).await;
 
             // ALSO notify the newly joined peer that other_id is already waiting in the room!
             let msg_for_new = serde_json::json!({
@@ -93,18 +106,29 @@ impl RoomManager {
                 "initiator": false
             }).to_string();
             println!("[NOTIFY] Notifying new peer #{} that peer #{} is in room {}", conn_id, other_id, room_id);
-            let _ = sender.send(Message::Text(msg_for_new));
+            let _ = sender.send(Message::Text(msg_for_new)).await;
         }
     }
 
-    fn broadcast_to_room(&self, room_id: &str, sender_id: usize, msg: Message) {
+    async fn broadcast_to_room(&self, room_id: &str, sender_id: usize, msg: Message) {
+        // Collect targets first: retain()'s closure cannot await, and
+        // senders whose receiver is gone are pruned from the room here.
+        let targets: Vec<PeerSender> = if let Some(entry) = self.rooms.get(room_id) {
+            entry
+                .iter()
+                .filter(|(id, tx)| *id != sender_id && !tx.is_closed())
+                .map(|(_, tx)| tx.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         if let Some(mut entry) = self.rooms.get_mut(room_id) {
-            entry.retain(|(id, peer_tx)| {
-                if *id == sender_id {
-                    return true;
-                }
-                peer_tx.send(msg.clone()).is_ok()
-            });
+            entry.retain(|(id, tx)| *id == sender_id || !tx.is_closed());
+        }
+        for peer_tx in targets {
+            // Bounded send: a slow peer throttles the sender's read loop
+            // instead of accumulating relay chunks in server RAM.
+            let _ = peer_tx.send(msg.clone()).await;
         }
     }
 
@@ -123,7 +147,7 @@ impl RoomManager {
         }
     }
 
-    fn notify_leave(&self, room_id: &str, conn_id: usize) {
+    async fn notify_leave(&self, room_id: &str, conn_id: usize) {
         let notification = serde_json::json!({
             "type": "user-left",
             "sender": conn_id.to_string()
@@ -132,7 +156,7 @@ impl RoomManager {
         if let Some(peers) = self.rooms.get(room_id) {
             for (id, peer_tx) in peers.iter() {
                 if *id != conn_id {
-                    let _ = peer_tx.send(Message::Text(msg_text.clone()));
+                    let _ = peer_tx.send(Message::Text(msg_text.clone())).await;
                 }
             }
         }
@@ -141,7 +165,7 @@ impl RoomManager {
     // Delayed notice for transport loss. Suppressed when the room is full
     // again (peer rejoining after a transient drop), which is the common
     // phone-picker-suspend case.
-    fn fire_leave_notice(&self, room_id: &str, conn_id: usize) {
+    async fn fire_leave_notice(&self, room_id: &str, conn_id: usize) {
         self.room_busy.remove(room_id);
         let full = self.rooms.get(room_id).map(|e| e.len() >= 2).unwrap_or(false);
         if full {
@@ -149,13 +173,13 @@ impl RoomManager {
             return;
         }
         println!("[ROOM] Client #{} left room {} (confirmed after grace)", conn_id, room_id);
-        self.notify_leave(room_id, conn_id);
+        self.notify_leave(room_id, conn_id).await;
     }
 
     fn schedule_leave_notice(rooms: Arc<RoomManager>, room_id: String, conn_id: usize, delay_secs: u64) {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
-            rooms.fire_leave_notice(&room_id, conn_id);
+            rooms.fire_leave_notice(&room_id, conn_id).await;
         });
     }
 
@@ -178,7 +202,7 @@ impl RoomManager {
         dropped
     }
 
-    fn leave_all_rooms(&self, conn_id: usize) {
+    async fn leave_all_rooms(&self, conn_id: usize) {
         // Collect first, notify after: DashMap shard locks are NOT
         // re-entrant, so rooms.get() inside rooms.retain() deadlocks the
         // (single) runtime thread and hangs the whole server.
@@ -193,7 +217,7 @@ impl RoomManager {
             !peers.is_empty()
         });
         for room_id in left {
-            self.notify_leave(&room_id, conn_id);
+            self.notify_leave(&room_id, conn_id).await;
         }
         // Explicit leave ends any picker-busy state for this connection.
         self.room_busy.retain(|_, busy_id| *busy_id != conn_id);
@@ -239,7 +263,31 @@ async fn main() {
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        // GET / keeps serving index.html via ServeDir; POST / is the
+        // share-target fallback (a bare .route("/", post(..)) would turn
+        // every GET / into 405, since axum never consults the fallback
+        // service when the path matches but the method doesn't).
+        .route(
+            "/",
+            get_service(ServeDir::new(&dist_dir)).post(share_target_fallback),
+        )
         .fallback_service(serve_dir)
+        // Room codes travel in URLs (?room=XX): never leak them via Referer,
+        // never allow the app to be iframed (UI redress), and block MIME
+        // sniffing of served assets. No CSP yet: the inline boot script and
+        // inlined CSS would require hash/nonce plumbing first.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
         .layer(compression)
         .layer(cors)
         .with_state(state);
@@ -259,11 +307,26 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
+// Share-target safety net: if Android delivers a share POST while the
+// service worker isn't active yet to intercept it, the body would otherwise
+// hit the static file service (405) and the shared file would be lost.
+// This redirects into the app WITHOUT reading the body — the server never
+// buffers or stores shared files, so the zero-storage invariant holds.
+async fn share_target_fallback(
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Redirect, StatusCode> {
+    if params.contains_key("share-target") {
+        Ok(Redirect::to("/?share-target"))
+    } else {
+        Err(StatusCode::METHOD_NOT_ALLOWED)
+    }
+}
+
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let conn_id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);
     println!("[WS] Client #{} connected", conn_id);
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx) = mpsc::channel::<Message>(PEER_CHANNEL_CAPACITY);
 
     let forward_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -278,8 +341,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
         loop {
             interval.tick().await;
-            if ping_tx.send(Message::Ping(vec![])).is_err() {
-                break;
+            // Best-effort: a full queue means the peer is already
+            // backpressured, so skip this ping instead of stalling.
+            // Only a closed channel ends the ping loop.
+            match ping_tx.try_send(Message::Ping(vec![])) {
+                Err(mpsc::error::TrySendError::Closed(_)) => break,
+                _ => {}
             }
         }
     });
@@ -294,11 +361,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                     if let Some(r_id) = header.room_id {
                         current_room = Some(r_id.clone());
                         if header.msg_type == "join-room" {
-                            rooms.join_room(&r_id, conn_id, tx.clone());
+                            rooms.join_room(&r_id, conn_id, tx.clone()).await;
                             continue;
                         }
                         if header.msg_type == "leave-room" {
-                            rooms.leave_all_rooms(conn_id);
+                            rooms.leave_all_rooms(conn_id).await;
                             current_room = None;
                             continue;
                         }
@@ -314,12 +381,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 
                 // Relay all other room messages (WebRTC signaling, ICE candidates, fallback data)
                 if let Some(ref r_id) = current_room {
-                    rooms.broadcast_to_room(r_id, conn_id, msg);
+                    rooms.broadcast_to_room(r_id, conn_id, msg).await;
                 }
             }
             Message::Binary(_) => {
                 if let Some(ref r_id) = current_room {
-                    rooms.broadcast_to_room(r_id, conn_id, msg);
+                    rooms.broadcast_to_room(r_id, conn_id, msg).await;
                 }
             }
             Message::Close(_) => break,

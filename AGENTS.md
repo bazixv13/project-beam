@@ -3,7 +3,10 @@
 > **Notice to AI Agents:** You are assisting a contributor working on **Project BEAM** (an ultra-lean, high-throughput WebRTC & native Rust file transfer engine). Read this document carefully before proposing, modifying, or testing any code.
 > 
 > **Repository:** `https://github.com/bazixv13/project-beam`
-> **Development / Live Server:** `https://filetrans.duckdns.org/` (Auto-deployed on push to `main`)
+> **Branches (see `introduce.md` — it is authoritative on workflow):**
+> - `develop` — agents + contributor push here. Auto-deploys to dev: `https://filetrans.duckdns.org/`
+> - `main` — **owner only (protected)**. Auto-deploys to prod: `https://beam.hs.vc/`
+> **Agents never push to `main`.**
 
 ---
 
@@ -12,7 +15,7 @@
 - **Objective:** Maximum throughput, zero-bloat file transfer between browsers with 0ms room connection latency and high fault-tolerance.
 - **Server Environment:** Oracle Cloud Rocky Linux 9 instance (`1 GB RAM, 1 vCPU core`).
 - **Critical Resource Constraint:** Memory is severely constrained on the server. The backend server must remain minimal (~1.5 MB RAM footprint) and never buffer entire files in memory. All streaming must be zero-copy or chunk-streamed in RAM.
-- **Continuous Deployment:** All commits merged or pushed to the `main` branch trigger an automated CI/CD pipeline via GitHub Actions that builds the frontend and Rust binary, deploys them to the server, and verifies the endpoint at `https://filetrans.duckdns.org/`. Manual deployment steps are not required.
+- **Continuous Deployment:** Pushes to `develop` trigger `deploy.yml` (dev at `https://filetrans.duckdns.org/`); pushes to `main` (owner only) trigger `deploy-prod.yml` (prod at `https://beam.hs.vc/`). Both build frontend + Rust binary, deploy over SSH, and verify HTTP 200. Manual deployment steps are not required.
 
 ---
 
@@ -21,10 +24,16 @@
 ```
 project-beam/
 ├── .github/workflows/
-│   └── deploy.yml       # Automated CI/CD pipeline for development server
-├── client/              # React 19 + Vite Frontend
+│   ├── deploy.yml       # Dev CI/CD: push to `develop` → filetrans.duckdns.org
+│   └── deploy-prod.yml  # Prod CI/CD: push to `main` (owner) → beam.hs.vc
+├── client/              # React 19 + Vite Frontend (installable PWA)
+│   ├── public/
+│   │   ├── manifest.webmanifest # PWA manifest: icons, share_target (Android share sheet)
+│   │   ├── sw.js        # Minimal SW: share-target POST → IndexedDB handoff, no precache
+│   │   └── icon-*.png / mono-512.png / favicon.svg # Launcher, maskable, monochrome, tab icons
 │   ├── src/
 │   │   ├── App.jsx      # UI layout, room orchestration, theme, transfer strips
+│   │   ├── main.jsx     # Entry: SW registration
 │   │   ├── webrtc.js    # Core transfer engine: WebRTC DataChannel + WS relay fallback
 │   │   ├── index.css    # High-contrast brutalist monochrome styling
 │   │   ├── QRScanner.jsx # Camera-based QR code reader
@@ -33,7 +42,7 @@ project-beam/
 │   └── vite.config.js
 └── server/              # Native Rust Signaling & Binary Relay Server
     ├── src/
-    │   └── main.rs      # Axum WebSocket server, room registry, departure alerts
+    │   └── main.rs      # Axum server: room registry, WS relay (bounded), static + share fallback
     ├── Cargo.toml
     └── Cargo.lock
 ```
@@ -64,10 +73,10 @@ When modifying this repository, AI agents must strictly follow these invariants:
 ### B. Backend (`server/src/main.rs`)
 1. **Zero State Persistence:**
    - No database, no disk caching. All rooms and connections exist only in memory via thread-safe `DashMap`.
-2. **Departure Notification:**
-   - If a peer disconnects, navigates away, or closes the socket, broadcast `{"type": "user-left", "sender": id}` to any remaining room participant immediately.
-3. **Binary Relay Fallback:**
-   - Relay binary chunks directly across unbounded channels without unpacking, deserializing, or cloning payload buffers.
+2. **Departure Notification (Delayed, Grace-Based):**
+   - If a peer disconnects, navigates away, or closes the socket, the slot is freed immediately but the remaining peer is notified only after a grace period (5s normal, 150s while the peer announced an open file picker), via `{"type": "user-left", "sender": id}`. The notice is suppressed if the peer rejoins in time. Never notify instantly — phones suspend sockets for seconds and instant notices cause false disconnect flicker.
+3. **Binary Relay Fallback (Bounded + Backpressure, Never Drop):**
+   - Relay binary chunks across BOUNDED per-peer channels (`PEER_CHANNEL_CAPACITY = 64`, ~4MB worst case). A full queue must exert backpressure on the sender's read loop — never `try_send`-and-drop relay chunks (no retransmission exists) and never restore unbounded channels (OOM risk on the 1GB box). Only pings may be best-effort skipped on a full queue.
 
 ---
 
@@ -92,26 +101,20 @@ cargo build --release
 
 ## 5. Directions for AI Agents: How to Contribute & Push Changes
 
-When you (the AI agent) have finished implementing and verifying code changes for the contributor, follow these step-by-step Git instructions:
+When you (the AI agent) have finished implementing and verifying code changes for the contributor, follow the `develop`-only workflow (`introduce.md` is authoritative — agents never touch `main`):
 
-### Step 1: Clone or Pull the Latest Main
-If starting on a new machine:
-```bash
-git clone https://github.com/bazixv13/project-beam.git
-cd project-beam
-```
-If already cloned, ensure the local branch is up to date:
+### Step 1: Sync Develop
 ```bash
 git fetch origin
-git pull --rebase origin main
+git checkout develop
+git pull --rebase origin develop
 ```
 
-### Step 2: Create a Dedicated Branch
-Always make modifications on a feature or fix branch:
+### Step 2: Work Directly on Develop (or a Short-Lived Fix Branch)
+Small changes may go straight on `develop`. Larger work:
 ```bash
-git checkout -b feature/<descriptive-name>
-# or
 git checkout -b fix/<bug-description>
+# ... implement, verify, then merge back into develop before pushing
 ```
 
 ### Step 3: Verify Status & Cleanliness
@@ -129,12 +132,13 @@ git commit -m "feat(transfer): add support for X"
 git commit -m "fix(webrtc): resolve issue Y"
 ```
 
-### Step 5: Push Branch & Open Pull Request
-Push the branch to GitHub:
+### Step 5: Push to Develop (Deploys to Dev Automatically)
 ```bash
-git push -u origin HEAD
+git push origin develop
 ```
-Instruct the contributor to open a Pull Request at:
-`https://github.com/bazixv13/project-beam/pulls`
 
-Once reviewed and merged into `main`, the automated deployment workflow will automatically deploy the changes to `https://filetrans.duckdns.org/`.
+Pushing to `develop` triggers `deploy.yml`, which builds, deploys to `https://filetrans.duckdns.org/`, and verifies HTTP 200. The owner promotes `develop` → `main` for production.
+
+### Never Do These
+- **Never push to `main`** — it is owner-only and deploys to production.
+- **Never use `git reset --hard`** — it rewrites shared history. To undo, use `git revert <hash>` instead.
