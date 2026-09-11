@@ -163,7 +163,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.12';
+const APP_VERSION = 'v1.3.13';
 
 function BrandTitle() {
   const [showVersion, setShowVersion] = useState(false);
@@ -262,6 +262,12 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
+    // Match the phone status bar / browser chrome to the app theme.
+    // --bg-app is #ffffff in light mode, #000000 in dark mode.
+    try {
+      document.querySelector('meta[name="theme-color"]')
+        ?.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff');
+    } catch (_) {}
   }, [theme]);
 
   useEffect(() => {

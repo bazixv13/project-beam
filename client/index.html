@@ -25,6 +25,11 @@
           var sysLang = (navigator.languages && navigator.languages[0]) || navigator.language || '';
           var initialLang = savedLang || (sysLang.toLowerCase().startsWith('pl') ? 'pl' : 'en');
           document.documentElement.setAttribute('lang', initialLang);
+
+          // Paint the phone status bar to match the theme before first render
+          // (--bg-app: #ffffff light / #000000 dark) to avoid a color flash.
+          var themeMeta = document.querySelector('meta[name="theme-color"]');
+          if (themeMeta) themeMeta.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff');
         } catch (_) {}
       })();
     </script>
