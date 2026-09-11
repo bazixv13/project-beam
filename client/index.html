@@ -25,19 +25,6 @@
           var sysLang = (navigator.languages && navigator.languages[0]) || navigator.language || '';
           var initialLang = savedLang || (sysLang.toLowerCase().startsWith('pl') ? 'pl' : 'en');
           document.documentElement.setAttribute('lang', initialLang);
-
-          // Paint the phone status bar to match the theme before first render
-          // (--bg-app: #ffffff light / #000000 dark) to avoid a color flash.
-          // Note: recreated (not setAttribute) — Chrome Android only reacts
-          // to a brand-new theme-color node.
-          try {
-            var oldMeta = document.querySelector('meta[name="theme-color"]');
-            if (oldMeta) oldMeta.remove();
-            var themeMeta = document.createElement('meta');
-            themeMeta.name = 'theme-color';
-            themeMeta.content = theme === 'dark' ? '#000000' : '#ffffff';
-            document.head.appendChild(themeMeta);
-          } catch (_) {}
         } catch (_) {}
       })();
     </script>

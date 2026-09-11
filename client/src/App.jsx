@@ -91,19 +91,6 @@ function generate2CharRoomId() {
   return chars.charAt(Math.floor(Math.random() * chars.length)) + chars.charAt(Math.floor(Math.random() * chars.length));
 }
 
-// Chrome on Android ignores setAttribute() on an existing theme-color meta
-// tag — the status bar only updates when a brand-new node is inserted.
-function setThemeColorMeta(color) {
-  try {
-    const old = document.querySelector('meta[name="theme-color"]');
-    if (old) old.remove();
-    const meta = document.createElement('meta');
-    meta.name = 'theme-color';
-    meta.content = color;
-    document.head.appendChild(meta);
-  } catch (_) {}
-}
-
 function formatSize(bytes) {
   if (!bytes || bytes <= 0) return '0 B';
   const mb = bytes / (1024 * 1024);
@@ -176,7 +163,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.14';
+const APP_VERSION = 'v1.3.12';
 
 function BrandTitle() {
   const [showVersion, setShowVersion] = useState(false);
@@ -275,9 +262,6 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
-    // Match the phone status bar / browser chrome to the app theme.
-    // --bg-app is #ffffff in light mode, #000000 in dark mode.
-    setThemeColorMeta(theme === 'dark' ? '#000000' : '#ffffff');
   }, [theme]);
 
   useEffect(() => {
