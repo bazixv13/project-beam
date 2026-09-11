@@ -28,8 +28,16 @@
 
           // Paint the phone status bar to match the theme before first render
           // (--bg-app: #ffffff light / #000000 dark) to avoid a color flash.
-          var themeMeta = document.querySelector('meta[name="theme-color"]');
-          if (themeMeta) themeMeta.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff');
+          // Note: recreated (not setAttribute) — Chrome Android only reacts
+          // to a brand-new theme-color node.
+          try {
+            var oldMeta = document.querySelector('meta[name="theme-color"]');
+            if (oldMeta) oldMeta.remove();
+            var themeMeta = document.createElement('meta');
+            themeMeta.name = 'theme-color';
+            themeMeta.content = theme === 'dark' ? '#000000' : '#ffffff';
+            document.head.appendChild(themeMeta);
+          } catch (_) {}
         } catch (_) {}
       })();
     </script>
