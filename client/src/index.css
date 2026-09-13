@@ -117,14 +117,14 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.20 */
+     never changes width when swapping BEAM ↔ v1.3.22 */
   display: inline-grid;
   position: relative;
 }
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.20  ⌂';
+  content: 'v1.3.22  ⌂';
   visibility: hidden;
   height: 0;
   overflow: hidden;
@@ -173,7 +173,19 @@ body {
 .brand-home-btn:hover {
   color: var(--text-main);
   border-color: var(--text-main);
+  background: var(--border);
+}
+
+/* Lit whenever the version row is revealed — hovering the logo implies
+   intent toward the home action, so it reads active, not dormant */
+.brand-title--version .brand-home-btn {
+  color: var(--text-main);
+  border-color: var(--text-main);
   background: var(--bg-subtle);
+}
+
+.brand-title--version .brand-home-btn:hover {
+  background: var(--border);
 }
 
 .mode-badge-wrapper {
@@ -217,7 +229,6 @@ body {
   width: 260px;
   background: var(--bg-popup);
   backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-popup);
   padding: 0.75rem 0.85rem;
@@ -367,12 +378,6 @@ body {
 .btn-icon:hover {
   color: var(--text-main);
   border-color: var(--text-main);
-}
-
-.lang-toggle {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  font-weight: 700;
 }
 
 /* ============ MAIN CONTENT (SINGLE CONTINUOUS CANVAS) ============ */
@@ -902,68 +907,125 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* ============ SETTINGS MODAL ============ */
-.settings-modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100dvh;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  z-index: 3000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
+/* ============ SETTINGS PANEL (fresh rebuild) ============ */
+.settings-anchor {
+  position: relative;
 }
 
-.settings-modal {
-  width: 100%;
-  max-width: 400px;
-  background: var(--bg-app);
-  border-radius: 12px;
+/* Cog stays visible; only its focus ring is suppressed (blurred on click) */
+.settings-anchor > .btn-icon:focus {
+  outline: none;
+}
+
+/* Transparent click-catcher below the panel, above page content */
+.settings-scrim {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  z-index: 1999;
+  cursor: default;
+}
+
+.settings-panel {
+  position: absolute;
+  /* Panel's top/right edges sit exactly on the cog's top/right edges */
+  top: 0;
+  right: 0;
+  width: min(320px, calc(100vw - 2rem));
+  /* Solid base: fully readable even where backdrop-filter is unsupported */
+  background: rgba(255, 255, 255, 0.93);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-popup);
+  border-radius: 8px;
+  box-shadow: none;
+  z-index: 2001;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 0.75rem 1.2rem 1.2rem 1.2rem;
+  /* Grow out of the whole cog: origin at the button's center */
+  transform-origin: calc(100% - 18px) 18px;
+  animation: settings-open 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform, opacity;
 }
 
-.settings-header {
+[data-theme="dark"] .settings-panel {
+  background: rgba(16, 16, 20, 0.94);
+  box-shadow: none;
+}
+
+/* Frost upgrade where supported: thinner fill + real backdrop blur.
+   Unsupported browsers keep the solid base above — never invisible. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .settings-panel {
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(24px) saturate(160%);
+  }
+
+  [data-theme="dark"] .settings-panel {
+    background: rgba(16, 16, 20, 0.7);
+  }
+}
+
+/* X on the exact footprint of the cog (36x36, top-right corner) */
+.settings-panel .settings-x {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.settings-panel .settings-x:hover {
+  color: var(--text-main);
+}
+
+.settings-panel .settings-x:focus,
+.settings-panel .settings-x:focus-visible {
+  outline: none;
+}
+
+.settings-title-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 1.2rem;
+  min-height: 36px;
+  padding: 0 36px 0.6rem 0;
   border-bottom: 1px solid var(--border);
 }
 
-.settings-header h3 {
+.settings-title-row h3 {
   font-size: 1.1rem;
   font-weight: 700;
   margin: 0;
 }
 
-.settings-body {
-  padding: 1.2rem;
+.settings-rows {
+  padding-top: 1.2rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
 }
 
-.setting-item {
+.settings-row {
   display: flex;
   flex-direction: column;
   gap: 0.8rem;
-}
-
-.setting-info {
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-main);
 }
 
-.setting-select {
+.settings-dropdown {
   width: 100%;
   padding: 0.6rem 0.8rem;
   border-radius: 8px;
@@ -976,25 +1038,55 @@ body {
   cursor: pointer;
 }
 
-.setting-select:focus {
+.settings-dropdown:focus {
   border-color: var(--border-focus);
 }
 
-/* Toggle Switch */
-.toggle-switch {
+/* Segmented EN/PL control — flat brutalist, 48px touch targets */
+.settings-segmented {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.settings-segmented button {
+  flex: 1;
+  min-height: 48px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.settings-segmented button.is-active {
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+}
+
+.settings-switch {
   position: relative;
   display: inline-block;
   width: 50px;
   height: 28px;
 }
 
-.toggle-switch input {
+.settings-switch input {
   opacity: 0;
   width: 0;
   height: 0;
 }
 
-.slider {
+.settings-knob {
   position: absolute;
   cursor: pointer;
   top: 0;
@@ -1006,7 +1098,7 @@ body {
   border-radius: 34px;
 }
 
-.slider:before {
+.settings-knob:before {
   position: absolute;
   content: "";
   height: 20px;
@@ -1018,13 +1110,41 @@ body {
   border-radius: 50%;
 }
 
-input:checked + .slider {
+input:checked + .settings-knob {
   background-color: var(--text-main);
 }
 
-input:checked + .slider:before {
+input:checked + .settings-knob:before {
   transform: translateX(22px);
   background-color: var(--bg-app);
+}
+
+@keyframes settings-open {
+  from {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Collapse back into the cog on close — reverse of the open */
+.settings-panel.is-closing {
+  animation: settings-shut 0.2s cubic-bezier(0.32, 0.72, 0, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes settings-shut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.2);
+  }
 }
 
 /* ============ SVG FRAME WRAPPER ============ */
