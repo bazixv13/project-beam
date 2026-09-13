@@ -254,10 +254,13 @@ function useMorseEasterEgg() {
       morseBuffer.current += char;
 
       // Add visual ripple
+      const clientX = e.clientX ?? (e.changedTouches ? e.changedTouches[0].clientX : window.innerWidth / 2);
+      const clientY = e.clientY ?? (e.changedTouches ? e.changedTouches[0].clientY : 50);
+
       const newRipple = {
         id: Date.now() + Math.random(),
-        x: e.clientX,
-        y: e.clientY,
+        x: clientX,
+        y: clientY,
         type: char === '.' ? 'dit' : 'dah'
       };
       setRipples(prev => [...prev, newRipple]);
@@ -1217,10 +1220,10 @@ function App() {
             {showSvgFrame && _isInitiator ? (
               <div className="svg-frame-wrapper">
                 <svg className="room-svg-bg" width="407" height="458" viewBox="0 0 407 458" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M82.543 33H58.5L91.5 0H115.543L82.543 33Z" fill="white"/>
-                  <path d="M113.543 33H89.5L122.5 0H146.543L113.543 33Z" fill="white"/>
-                  <path d="M51.5322 33H27.5L60.4756 0H84.5068L51.5322 33Z" fill="white"/>
-                  <path d="M304.29 446H232.315L239.315 439H311.29L304.29 446Z" fill="white"/>
+                  <path d="M82.543 33H58.5L91.5 0H115.543L82.543 33Z" fill="var(--bg-app)"/>
+                  <path d="M113.543 33H89.5L122.5 0H146.543L113.543 33Z" fill="var(--bg-app)"/>
+                  <path d="M51.5322 33H27.5L60.4756 0H84.5068L51.5322 33Z" fill="var(--bg-app)"/>
+                  <path d="M304.29 446H232.315L239.315 439H311.29L304.29 446Z" fill="var(--bg-app)"/>
                   <path d="M407 37.9648V421.035L374.535 453.5H224.815L229.815 448.5H372.465L402 418.965V40.0352L367.465 5.5H154.035L118.035 41.5H24.0352L5 60.5352V411.965L45.5352 452.5H189.465L210.965 431H319.291L314.291 436H213.035L191.535 457.5H43.4648L0 414.035V58.4648L21.9648 36.5H115.965L151.965 0.5H369.535L407 37.9648Z" fill="var(--text-main)"/>
                   <rect x="244.107" y="437" width="1.94331" height="13.9629" transform="rotate(45 244.107 437)" fill="var(--bg-app)"/>
                   <rect x="249.689" y="436.684" width="1.94331" height="14.5882" transform="rotate(45 249.689 436.684)" fill="var(--bg-app)"/>
