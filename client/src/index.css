@@ -117,14 +117,14 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.14 */
+     never changes width when swapping BEAM ↔ v1.3.15 */
   display: inline-grid;
   position: relative;
 }
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.14';
+  content: 'v1.3.15  ⌂';
   visibility: hidden;
   height: 0;
   overflow: hidden;
@@ -141,6 +141,9 @@ body {
 
 .brand-title__version {
   opacity: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .brand-title--version .brand-title__beam {
@@ -149,6 +152,28 @@ body {
 
 .brand-title--version .brand-title__version {
   opacity: 1;
+}
+
+.brand-home-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.brand-home-btn:hover {
+  color: var(--text-main);
+  border-color: var(--text-main);
+  background: var(--bg-subtle);
 }
 
 .mode-badge-wrapper {
@@ -1031,4 +1056,58 @@ input:checked + .slider:before {
   z-index: 10;
   gap: 1.5rem;
   padding-bottom: 20px;
+}
+
+/* ============ MATRIX RAIN EASTER EGG ============ */
+.matrix-rain {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  pointer-events: none;
+  animation: matrix-fade 6s ease-in-out forwards;
+}
+
+@keyframes matrix-fade {
+  0% { opacity: 0; }
+  5% { opacity: 0.85; }
+  75% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+/* ============ MORSE RIPPLES ============ */
+.morse-ripple {
+  position: fixed;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 9998;
+  opacity: 0;
+}
+
+.morse-ripple.dit {
+  width: 20px;
+  height: 20px;
+  background-color: var(--text-main);
+  animation: ripple-dit 0.4s ease-out forwards;
+}
+
+.morse-ripple.dah {
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--text-main);
+  background-color: transparent;
+  animation: ripple-dah 0.8s ease-out forwards;
+}
+
+@keyframes ripple-dit {
+  0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0.8; }
+  100% { transform: translate(-50%, -50%) scale(2); opacity: 0; }
+}
+
+@keyframes ripple-dah {
+  0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
 }

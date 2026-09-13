@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check, Settings } from 'lucide-react';
+import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check, Settings, Home } from 'lucide-react';
 import { WebRTCConnection } from './webrtc';
 import './index.css';
 
@@ -44,7 +44,13 @@ const dict = {
     fallbackTitle: 'Relay Fallback (WebSocket)',
     fallbackDesc: 'Direct P2P was blocked by firewalls or NAT. Data streams safely in RAM through the encrypted server and is never stored.',
     handshakingP2p: 'Negotiating direct P2P upgrade…',
-    sharedReady: 'Shared file ready — join a room to send it'
+    sharedReady: 'Shared file ready — join a room to send it',
+    settings: 'Settings',
+    transferMode: 'Transfer Mode',
+    modeP2P: 'Direct P2P (WebRTC)',
+    modeRelay: 'Server Relay (WebSocket)',
+    showSvgFrame: 'Show SVG Frame',
+    goHome: 'Back to lobby'
   },
   pl: {
     title: 'Beam',
@@ -82,7 +88,13 @@ const dict = {
     fallbackTitle: 'Przekaźnik Fallback (WebSocket)',
     fallbackDesc: 'Połączenie P2P zostało zablokowane przez zaporę lub NAT. Dane są bezpiecznie przesyłane w pamięci RAM serwera i nie są zapisywane.',
     handshakingP2p: 'Negocjowanie bezpośredniego P2P…',
-    sharedReady: 'Udostępniony plik gotowy — dołącz do pokoju, aby go wysłać'
+    sharedReady: 'Udostępniony plik gotowy — dołącz do pokoju, aby go wysłać',
+    settings: 'Ustawienia',
+    transferMode: 'Tryb transferu',
+    modeP2P: 'Bezpośrednie P2P (WebRTC)',
+    modeRelay: 'Przez serwer (WebSocket)',
+    showSvgFrame: 'Pokaż ramkę SVG',
+    goHome: 'Wróć do lobby'
   }
 };
 
@@ -163,37 +175,174 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.14';
+const APP_VERSION = 'v1.3.15';
 
-function BrandTitle() {
-  const [showVersion, setShowVersion] = useState(false);
+function BrandTitle({ onGoHome, homeLabel }) {
+  const [hovered, setHovered] = useState(false);
   const revertTimer = useRef(null);
 
   const handleMouseEnter = () => {
-    setShowVersion(true);
+    setHovered(true);
     if (revertTimer.current) clearTimeout(revertTimer.current);
     revertTimer.current = setTimeout(() => {
-      setShowVersion(false);
-    }, 4000);
+      setHovered(false);
+    }, 6000);
   };
 
   const handleMouseLeave = () => {
     if (revertTimer.current) clearTimeout(revertTimer.current);
-    setShowVersion(false);
+    setHovered(false);
   };
 
   useEffect(() => () => { if (revertTimer.current) clearTimeout(revertTimer.current); }, []);
 
   return (
     <span
-      className={`brand-title${showVersion ? ' brand-title--version' : ''}`}
+      className={`brand-title${hovered ? ' brand-title--version' : ''}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      aria-label={showVersion ? APP_VERSION : 'BEAM'}
+      aria-label={hovered ? APP_VERSION : 'BEAM'}
     >
       <span className="brand-title__beam">BEAM</span>
-      <span className="brand-title__version">{APP_VERSION}</span>
+      <span className="brand-title__version">
+        {APP_VERSION}
+        <button
+          className="brand-home-btn"
+          onClick={(e) => { e.stopPropagation(); onGoHome?.(); }}
+          title={homeLabel || 'Home'}
+          aria-label={homeLabel || 'Home'}
+        >
+          <Home size={13} />
+        </button>
+      </span>
     </span>
+  );
+}
+
+// ============ MORSE CODE EASTER EGG (MOUSE) ============
+// Short click (<300ms) = '.' (dit), long press (>=300ms) = '-' (dah).
+// Spell P2P in Morse: .--. ..--- .--. → triggers matrix rain effect.
+// Visual ripple circles appear at click position as feedback.
+const MORSE_TARGET = '.--...---.--.';
+
+function useMorseEasterEgg() {
+  const [matrixActive, setMatrixActive] = useState(false);
+  const [ripples, setRipples] = useState([]);
+  const morseBuffer = useRef('');
+  const morseTimeout = useRef(null);
+  const mouseDownTime = useRef(0);
+
+  useEffect(() => {
+    const handleMouseDown = (e) => {
+      // Ignore clicks on inputs, buttons, etc. to avoid interference
+      if (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'A'].includes(e.target.tagName)) return;
+      if (e.target.closest('.brand-home-btn') || e.target.closest('.btn-icon') || e.target.closest('button')) return;
+      
+      mouseDownTime.current = Date.now();
+    };
+
+    const handleMouseUp = (e) => {
+      if (!mouseDownTime.current) return;
+      
+      const duration = Date.now() - mouseDownTime.current;
+      mouseDownTime.current = 0;
+
+      // Threshold: 300ms. < 300ms is dit (.), >= 300ms is dah (-)
+      const char = duration < 300 ? '.' : '-';
+      morseBuffer.current += char;
+
+      // Add visual ripple
+      const newRipple = {
+        id: Date.now() + Math.random(),
+        x: e.clientX,
+        y: e.clientY,
+        type: char === '.' ? 'dit' : 'dah'
+      };
+      setRipples(prev => [...prev, newRipple]);
+      setTimeout(() => {
+        setRipples(prev => prev.filter(r => r.id !== newRipple.id));
+      }, 800); // Remove after animation completes
+
+      if (morseTimeout.current) clearTimeout(morseTimeout.current);
+      morseTimeout.current = setTimeout(() => { morseBuffer.current = ''; }, 4000);
+
+      // Check if buffer ends with the P2P morse sequence
+      const buf = morseBuffer.current;
+      if (buf.endsWith(MORSE_TARGET) || buf.endsWith('.--.··---.--.')) {
+        morseBuffer.current = '';
+        setMatrixActive(true);
+        setTimeout(() => setMatrixActive(false), 6000);
+      }
+    };
+
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mouseup', handleMouseUp);
+    
+    // Also support touch devices
+    window.addEventListener('touchstart', handleMouseDown, { passive: true });
+    window.addEventListener('touchend', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchstart', handleMouseDown);
+      window.removeEventListener('touchend', handleMouseUp);
+      if (morseTimeout.current) clearTimeout(morseTimeout.current);
+    };
+  }, []);
+
+  return { matrixActive, ripples };
+}
+
+// Matrix rain canvas component
+function MatrixRain() {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let animId;
+    let w, h, cols, drops;
+
+    const chars = 'BEAM P2P WEBRTC 01 .--.··---.--. ⚡🔗'.split('');
+
+    const resize = () => {
+      w = canvas.width = window.innerWidth;
+      h = canvas.height = window.innerHeight;
+      cols = Math.floor(w / 16);
+      drops = new Array(cols).fill(1);
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const draw = () => {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#0f0';
+      ctx.font = '14px monospace';
+      for (let i = 0; i < cols; i++) {
+        const ch = chars[Math.floor(Math.random() * chars.length)];
+        ctx.fillText(ch, i * 16, drops[i] * 16);
+        if (drops[i] * 16 > h && Math.random() > 0.975) drops[i] = 0;
+        drops[i]++;
+      }
+      animId = requestAnimationFrame(draw);
+    };
+    draw();
+
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener('resize', resize);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="matrix-rain"
+      aria-hidden="true"
+    />
   );
 }
 
@@ -330,6 +479,8 @@ function App() {
       wakeLockRef.current = null;
     };
   }, [connectionState]);
+
+  const { matrixActive, ripples } = useMorseEasterEgg();
 
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
@@ -832,6 +983,18 @@ function App() {
         if (inRoom) handleDrop(e);
       }}
     >
+      {/* Morse Easter Egg: Matrix Rain */}
+      {matrixActive && <MatrixRain />}
+      
+      {/* Morse Easter Egg: Ripples */}
+      {ripples.map(r => (
+        <div 
+          key={r.id} 
+          className={`morse-ripple ${r.type}`} 
+          style={{ left: r.x, top: r.y }} 
+        />
+      ))}
+
       {showScanner && (
         <Suspense fallback={null}>
           <QRScanner 
@@ -845,7 +1008,7 @@ function App() {
       {/* Brutalist Top Header */}
       <header className="app-header">
         <div className="brand">
-          <BrandTitle />
+          <BrandTitle onGoHome={inRoom ? handleLeaveRoom : () => window.location.reload()} homeLabel={t.goHome} />
           {inRoom && connectionState === 'connected' && (
             <div className={`mode-badge-wrapper ${transferMode}`} tabIndex={0}>
               <span className="mode-indicator">
