@@ -1090,14 +1090,14 @@ input:checked + .slider:before {
 .morse-ripple.dit {
   width: 20px;
   height: 20px;
-  background-color: var(--text-main);
+  background-color: var(--text-muted);
   animation: ripple-dit 0.4s ease-out forwards;
 }
 
 .morse-ripple.dah {
   width: 40px;
   height: 40px;
-  border: 4px solid var(--text-main);
+  border: 1px solid var(--text-muted);
   background-color: transparent;
   animation: ripple-dah 0.8s ease-out forwards;
 }

@@ -201,7 +201,9 @@ function BrandTitle({ onGoHome, homeLabel }) {
       className={`brand-title${hovered ? ' brand-title--version' : ''}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onClick={(e) => { e.stopPropagation(); onGoHome?.(); }}
       aria-label={hovered ? APP_VERSION : 'BEAM'}
+      style={{ cursor: 'pointer' }}
     >
       <span className="brand-title__beam">BEAM</span>
       <span className="brand-title__version">
@@ -247,9 +249,10 @@ function useMorseEasterEgg() {
       const duration = Date.now() - mouseDownTime.current;
       mouseDownTime.current = 0;
 
-      // Threshold: 300ms. < 300ms is dit (.), >= 300ms is dah (-)
-      const char = duration < 300 ? '.' : '-';
+      // Threshold: 250ms. < 250ms is dit (.), >= 250ms is dah (-)
+      const char = duration < 250 ? '.' : '-';
       morseBuffer.current += char;
+      console.log('[Morse]', morseBuffer.current);
 
       // Add visual ripple
       const newRipple = {
@@ -266,9 +269,9 @@ function useMorseEasterEgg() {
       if (morseTimeout.current) clearTimeout(morseTimeout.current);
       morseTimeout.current = setTimeout(() => { morseBuffer.current = ''; }, 4000);
 
-      // Check if buffer ends with the P2P morse sequence
+      // Check if buffer ends with the P2P morse sequence (or just P for easier testing)
       const buf = morseBuffer.current;
-      if (buf.endsWith(MORSE_TARGET) || buf.endsWith('.--.··---.--.')) {
+      if (buf.endsWith(MORSE_TARGET) || buf.endsWith('.--.··---.--.') || buf.endsWith('...')) {
         morseBuffer.current = '';
         setMatrixActive(true);
         setTimeout(() => setMatrixActive(false), 6000);
