@@ -50,6 +50,8 @@ const dict = {
     modeP2P: 'Direct P2P (WebRTC)',
     modeRelay: 'Server Relay (WebSocket)',
     showSvgFrame: 'Show SVG Frame',
+    touchFx: 'Touch FX',
+    language: 'Language',
     goHome: 'Back to lobby'
   },
   pl: {
@@ -94,6 +96,8 @@ const dict = {
     modeP2P: 'Bezpośrednie P2P (WebRTC)',
     modeRelay: 'Przez serwer (WebSocket)',
     showSvgFrame: 'Pokaż ramkę SVG',
+    touchFx: 'Efekty dotyku',
+    language: 'Język',
     goHome: 'Wróć do lobby'
   }
 };
@@ -175,7 +179,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.21';
+const APP_VERSION = 'v1.3.22';
 
 function BrandTitle({ onGoHome, homeLabel }) {
   const [hovered, setHovered] = useState(false);
@@ -227,7 +231,7 @@ function BrandTitle({ onGoHome, homeLabel }) {
 // Visual ripple circles appear at click position as feedback.
 const MORSE_TARGET = '.--...---.--.';
 
-function useMorseEasterEgg() {
+function useMorseEasterEgg(enabled = true) {
   const [matrixActive, setMatrixActive] = useState(false);
   const [ripples, setRipples] = useState([]);
   const morseBuffer = useRef('');
@@ -235,6 +239,7 @@ function useMorseEasterEgg() {
   const mouseDownTime = useRef(0);
 
   useEffect(() => {
+    if (!enabled) return;
     const handleMouseDown = (e) => {
       // Ignore clicks on inputs, buttons, etc. to avoid interference
       if (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'A'].includes(e.target.tagName)) return;
@@ -294,7 +299,7 @@ function useMorseEasterEgg() {
       window.removeEventListener('touchend', handleMouseUp);
       if (morseTimeout.current) clearTimeout(morseTimeout.current);
     };
-  }, []);
+  }, [enabled]);
 
   return { matrixActive, ripples };
 }
@@ -373,13 +378,33 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [transferMode, setTransferMode] = useState('p2p'); // 'p2p' | 'fallback'
   const [p2pHandshaking, setP2pHandshaking] = useState(false);
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsClosing, setSettingsClosing] = useState(false);
+  const settingsCloseTimer = useRef(null);
+
+  // Animated close: the panel collapses back into the cog, then unmounts
+  const closeSettings = () => {
+    if (!settingsOpen || settingsClosing) return;
+    setSettingsClosing(true);
+    if (settingsCloseTimer.current) clearTimeout(settingsCloseTimer.current);
+    settingsCloseTimer.current = setTimeout(() => {
+      setSettingsOpen(false);
+      setSettingsClosing(false);
+      settingsCloseTimer.current = null;
+    }, 200);
+  };
+
+  useEffect(() => () => { if (settingsCloseTimer.current) clearTimeout(settingsCloseTimer.current); }, []);
   
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [forceRelay, setForceRelay] = useState(() => {
     return localStorage.getItem('forceRelay') === 'true';
   });
   const [showSvgFrame, setShowSvgFrame] = useState(() => {
     return localStorage.getItem('showSvgFrame') !== 'false';
+  });
+  const [touchFx, setTouchFx] = useState(() => {
+    return localStorage.getItem('touchFx') !== 'false';
   });
 
   // Independent send and receive states for concurrent bidirectional transfer
@@ -438,6 +463,20 @@ function App() {
   }, [showSvgFrame]);
 
   useEffect(() => {
+    localStorage.setItem('touchFx', touchFx);
+  }, [touchFx]);
+
+  // Close the settings panel on Escape
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeSettings();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settingsOpen, settingsClosing]);
+
+  useEffect(() => {
     const handleUnload = () => {
       if (webrtc.current) {
         webrtc.current.close();
@@ -485,7 +524,7 @@ function App() {
     };
   }, [connectionState]);
 
-  const { matrixActive, ripples } = useMorseEasterEgg();
+  const { matrixActive, ripples } = useMorseEasterEgg(touchFx);
 
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
@@ -1069,69 +1108,100 @@ function App() {
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
 
-          <button 
-            className="btn-icon lang-toggle" 
-            onClick={() => setLang(lang === 'pl' ? 'en' : 'pl')} 
-            title="Switch Language"
-          >
-            <span>{lang.toUpperCase()}</span>
-          </button>
+          <div className="settings-anchor">
+            <button
+              className="btn-icon"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                if (settingsOpen) closeSettings();
+                else {
+                  if (settingsCloseTimer.current) clearTimeout(settingsCloseTimer.current);
+                  setSettingsClosing(false);
+                  setSettingsOpen(true);
+                }
+              }}
+              aria-expanded={settingsOpen}
+              title={t.settings}
+              aria-label={t.settings}
+            >
+              <Settings size={16} />
+            </button>
+            {(settingsOpen || settingsClosing) && (
+              <div className={`settings-panel${settingsClosing ? ' is-closing' : ''}`} role="dialog" aria-label={t.settings} onClick={(e) => e.stopPropagation()}>
+                <button className="settings-x" onClick={(e) => { e.currentTarget.blur(); closeSettings(); }} aria-label="Close settings" title="Close">
+                  <X size={16} />
+                </button>
+                <div className="settings-title-row">
+                  <h3>{t.settings}</h3>
+                </div>
+                <div className="settings-rows">
+                  <div className="settings-row">
+                    <span>{t.transferMode}</span>
+                    <select
+                      className="settings-dropdown"
+                      value={forceRelay ? 'relay' : 'p2p'}
+                      onChange={e => {
+                        setForceRelay(e.target.value === 'relay');
+                      }}
+                    >
+                      <option value="p2p">{t.modeP2P}</option>
+                      <option value="relay">{t.modeRelay}</option>
+                    </select>
+                  </div>
+                  <div className="settings-row">
+                    <span>{t.language}</span>
+                    <div className="settings-segmented" role="group" aria-label={t.language}>
+                      <button
+                        type="button"
+                        className={lang === 'en' ? 'is-active' : ''}
+                        onClick={() => setLang('en')}
+                        aria-pressed={lang === 'en'}
+                      >
+                        EN
+                      </button>
+                      <button
+                        type="button"
+                        className={lang === 'pl' ? 'is-active' : ''}
+                        onClick={() => setLang('pl')}
+                        aria-pressed={lang === 'pl'}
+                      >
+                        PL
+                      </button>
+                    </div>
+                  </div>
+                  <div className="settings-row">
+                    <span>{t.showSvgFrame}</span>
+                    <label className="settings-switch">
+                      <input
+                        type="checkbox"
+                        checked={showSvgFrame}
+                        onChange={e => setShowSvgFrame(e.target.checked)}
+                      />
+                      <span className="settings-knob"></span>
+                    </label>
+                  </div>
+                  <div className="settings-row">
+                    <span>{t.touchFx}</span>
+                    <label className="settings-switch">
+                      <input
+                        type="checkbox"
+                        checked={touchFx}
+                        onChange={e => setTouchFx(e.target.checked)}
+                      />
+                      <span className="settings-knob"></span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
-          <button 
-            className="btn-icon" 
-            onClick={() => setShowSettingsModal(true)}
-            title={t.settings}
-            aria-label={t.settings}
-          >
-            <Settings size={16} />
-          </button>
         </div>
       </header>
 
-      {/* Settings Modal */}
-      {showSettingsModal && (
-        <div className="settings-modal-overlay" onClick={() => setShowSettingsModal(false)}>
-          <div className="settings-modal" onClick={e => e.stopPropagation()}>
-            <div className="settings-header">
-              <h3>{t.settings}</h3>
-              <button className="btn-icon" onClick={() => setShowSettingsModal(false)}>
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div className="settings-body">
-              <div className="setting-item">
-                <div className="setting-info">
-                  <span>{t.transferMode}</span>
-                </div>
-                <select 
-                  className="setting-select" 
-                  value={forceRelay ? 'relay' : 'p2p'} 
-                  onChange={e => {
-                    setForceRelay(e.target.value === 'relay');
-                  }}
-                >
-                  <option value="p2p">{t.modeP2P}</option>
-                  <option value="relay">{t.modeRelay}</option>
-                </select>
-              </div>
-
-              <div className="setting-item">
-                <div className="setting-info">
-                  <span>{t.showSvgFrame}</span>
-                </div>
-                <label className="toggle-switch">
-                  <input 
-                    type="checkbox" 
-                    checked={showSvgFrame} 
-                    onChange={e => setShowSvgFrame(e.target.checked)} 
-                  />
-                  <span className="slider"></span>
-                </label>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Transparent scrim: catches outside clicks while the panel is open */}
+      {(settingsOpen || settingsClosing) && (
+        <div className="settings-scrim" onClick={() => closeSettings()} />
       )}
 
       {/* Main Single-Surface Canvas */}
