@@ -175,7 +175,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.17';
+const APP_VERSION = 'v1.3.18';
 
 function BrandTitle({ onGoHome, homeLabel }) {
   const [hovered, setHovered] = useState(false);
@@ -252,7 +252,6 @@ function useMorseEasterEgg() {
       // Threshold: 250ms. < 250ms is dit (.), >= 250ms is dah (-)
       const char = duration < 250 ? '.' : '-';
       morseBuffer.current += char;
-      console.log('[Morse]', morseBuffer.current);
 
       // Add visual ripple
       const newRipple = {
