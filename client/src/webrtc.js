@@ -45,7 +45,8 @@ export class WebRTCConnection {
     onFileReceived,
     onPeerZipping,
     onOffline,
-    onHandshakeStateChange
+    onHandshakeStateChange,
+    forceRelay
   }) {
     this.roomId = roomId;
     this.isInitiator = isInitiator;
@@ -65,6 +66,7 @@ export class WebRTCConnection {
     this.isP2pHandshaking = false;
     this.fallbackTimer = null;
     this.isClosed = false;
+    this.forceRelay = forceRelay || false;
 
     // Receiving state
     this.receiveFileId = null;
@@ -268,15 +270,23 @@ export class WebRTCConnection {
             this.setConnected('ws');
 
             // 2. Concurrently attempt direct WebRTC P2P upgrade in the background
-            this.setHandshaking(true);
-            this.initPeerConnection();
-            if (this.isInitiator) {
-              this.initiateOffer();
+            if (this.forceRelay) {
+              this.downgradeToRelay('forced_relay', true);
+            } else {
+              this.setHandshaking(true);
+              this.initPeerConnection();
+              if (this.isInitiator) {
+                this.initiateOffer();
+              }
             }
             break;
 
           case 'webrtc-offer':
             console.log('[P2P] Received WebRTC offer');
+            if (this.forceRelay) {
+              this.downgradeToRelay('forced_relay', true);
+              break;
+            }
             if (msg.sender) this.remotePeerId = msg.sender;
             try {
               if (this.peerConnection.signalingState !== 'stable') {
@@ -557,7 +567,7 @@ export class WebRTCConnection {
   }
 
   attemptUpgrade() {
-    if (this.isClosed) return;
+    if (this.isClosed || this.forceRelay) return;
     const pcState = this.peerConnection?.connectionState;
     const iceState = this.peerConnection?.iceConnectionState;
     const pcConnected = (pcState === 'connected') || (iceState === 'connected' || iceState === 'completed');

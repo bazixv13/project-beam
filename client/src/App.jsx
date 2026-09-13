@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check } from 'lucide-react';
+import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check, Settings } from 'lucide-react';
 import { WebRTCConnection } from './webrtc';
 import './index.css';
 
@@ -163,7 +163,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.13';
+const APP_VERSION = 'v1.3.14';
 
 function BrandTitle() {
   const [showVersion, setShowVersion] = useState(false);
@@ -219,6 +219,14 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [transferMode, setTransferMode] = useState('p2p'); // 'p2p' | 'fallback'
   const [p2pHandshaking, setP2pHandshaking] = useState(false);
+  
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [forceRelay, setForceRelay] = useState(() => {
+    return localStorage.getItem('forceRelay') === 'true';
+  });
+  const [showSvgFrame, setShowSvgFrame] = useState(() => {
+    return localStorage.getItem('showSvgFrame') !== 'false';
+  });
 
   // Independent send and receive states for concurrent bidirectional transfer
   const [sendProgress, setSendProgress] = useState({
@@ -263,6 +271,17 @@ function App() {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem('forceRelay', forceRelay);
+    if (forceRelay && transferMode === 'p2p') {
+      // Re-init WebRTC to force relay if changed mid-session, though normally users change this before connecting
+    }
+  }, [forceRelay]);
+
+  useEffect(() => {
+    localStorage.setItem('showSvgFrame', showSvgFrame);
+  }, [showSvgFrame]);
 
   useEffect(() => {
     const handleUnload = () => {
@@ -325,6 +344,7 @@ function App() {
     webrtc.current = new WebRTCConnection({
       roomId: id,
       isInitiator: isInit,
+      forceRelay: forceRelay,
       onHandshakeStateChange: (isHandshaking) => {
         setP2pHandshaking(isHandshaking);
       },
@@ -888,13 +908,61 @@ function App() {
           >
             <span>{lang.toUpperCase()}</span>
           </button>
+
+          <button 
+            className="btn-icon" 
+            onClick={() => setShowSettingsModal(true)}
+            title={t.settings}
+            aria-label={t.settings}
+          >
+            <Settings size={16} />
+          </button>
         </div>
       </header>
 
-      {/* No-Internet Banner */}
-      {isOffline && (
-        <div className="offline-banner" role="alert">
-          <span>{t.noInternet}</span>
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="settings-modal-overlay" onClick={() => setShowSettingsModal(false)}>
+          <div className="settings-modal" onClick={e => e.stopPropagation()}>
+            <div className="settings-header">
+              <h3>{t.settings}</h3>
+              <button className="btn-icon" onClick={() => setShowSettingsModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="settings-body">
+              <div className="setting-item">
+                <div className="setting-info">
+                  <span>{t.transferMode}</span>
+                </div>
+                <select 
+                  className="setting-select" 
+                  value={forceRelay ? 'relay' : 'p2p'} 
+                  onChange={e => {
+                    setForceRelay(e.target.value === 'relay');
+                  }}
+                >
+                  <option value="p2p">{t.modeP2P}</option>
+                  <option value="relay">{t.modeRelay}</option>
+                </select>
+              </div>
+
+              <div className="setting-item">
+                <div className="setting-info">
+                  <span>{t.showSvgFrame}</span>
+                </div>
+                <label className="toggle-switch">
+                  <input 
+                    type="checkbox" 
+                    checked={showSvgFrame} 
+                    onChange={e => setShowSvgFrame(e.target.checked)} 
+                  />
+                  <span className="slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -981,22 +1049,68 @@ function App() {
         {/* Connecting: Share 2-Char Room Code + QR */}
         {connectionState === 'connecting' && (
           <div className="view-flow connect-flow">
-            <div className="code-card">
-              <span className="code-label">{t.shareCode}</span>
-              <div className="code-huge" onClick={handleCopyLink}>
-                {roomId}
+            {showSvgFrame && _isInitiator ? (
+              <div className="svg-frame-wrapper">
+                <svg className="room-svg-bg" width="407" height="458" viewBox="0 0 407 458" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M82.543 33H58.5L91.5 0H115.543L82.543 33Z" fill="white"/>
+                  <path d="M113.543 33H89.5L122.5 0H146.543L113.543 33Z" fill="white"/>
+                  <path d="M51.5322 33H27.5L60.4756 0H84.5068L51.5322 33Z" fill="white"/>
+                  <path d="M304.29 446H232.315L239.315 439H311.29L304.29 446Z" fill="white"/>
+                  <path d="M407 37.9648V421.035L374.535 453.5H224.815L229.815 448.5H372.465L402 418.965V40.0352L367.465 5.5H154.035L118.035 41.5H24.0352L5 60.5352V411.965L45.5352 452.5H189.465L210.965 431H319.291L314.291 436H213.035L191.535 457.5H43.4648L0 414.035V58.4648L21.9648 36.5H115.965L151.965 0.5H369.535L407 37.9648Z" fill="var(--text-main)"/>
+                  <rect x="244.107" y="437" width="1.94331" height="13.9629" transform="rotate(45 244.107 437)" fill="var(--bg-app)"/>
+                  <rect x="249.689" y="436.684" width="1.94331" height="14.5882" transform="rotate(45 249.689 436.684)" fill="var(--bg-app)"/>
+                  <rect x="254.373" y="437" width="1.94331" height="13.9629" transform="rotate(45 254.373 437)" fill="var(--bg-app)"/>
+                  <rect x="259.909" y="436.731" width="1.94331" height="14.183" transform="rotate(45 259.909 436.731)" fill="var(--bg-app)"/>
+                  <rect x="264.373" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 264.373 437.316)" fill="var(--bg-app)"/>
+                  <rect x="269.956" y="437" width="1.94331" height="14.5882" transform="rotate(45 269.956 437)" fill="var(--bg-app)"/>
+                  <rect x="274.64" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 274.64 437.316)" fill="var(--bg-app)"/>
+                  <rect x="280.175" y="437.047" width="1.94331" height="14.183" transform="rotate(45 280.175 437.047)" fill="var(--bg-app)"/>
+                  <rect x="285.373" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 285.373 437.316)" fill="var(--bg-app)"/>
+                  <rect x="290.956" y="437" width="1.94331" height="14.5882" transform="rotate(45 290.956 437)" fill="var(--bg-app)"/>
+                  <rect x="295.64" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 295.64 437.316)" fill="var(--bg-app)"/>
+                  <rect x="301.175" y="437.047" width="1.94331" height="14.183" transform="rotate(45 301.175 437.047)" fill="var(--bg-app)"/>
+                  <rect x="306.373" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 306.373 437.316)" fill="var(--bg-app)"/>
+                  <rect x="311.956" y="437" width="1.94331" height="14.5882" transform="rotate(45 311.956 437)" fill="var(--bg-app)"/>
+                  <rect x="316.64" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 316.64 437.316)" fill="var(--bg-app)"/>
+                  <rect x="322.175" y="437.047" width="1.94331" height="14.183" transform="rotate(45 322.175 437.047)" fill="var(--bg-app)"/>
+                </svg>
+                <div className="frame-content">
+                  <div className="code-card">
+                    <span className="code-label">{t.shareCode}</span>
+                    <div className="code-huge" onClick={handleCopyLink}>
+                      {roomId}
+                    </div>
+                    <button className="btn-copy" onClick={handleCopyLink}>
+                      {copied ? <Check size={14} /> : <Copy size={14} />}
+                      <span>{copied ? t.copied : t.copyLink}</span>
+                    </button>
+                  </div>
+                  <div className="qr-wrapper">
+                    <Suspense fallback={<div style={{ width: 140, height: 140 }} />}>
+                      <QRCodeDisplay value={generateRoomUrl()} size={140} />
+                    </Suspense>
+                  </div>
+                </div>
               </div>
-              <button className="btn-copy" onClick={handleCopyLink}>
-                {copied ? <Check size={14} /> : <Copy size={14} />}
-                <span>{copied ? t.copied : t.copyLink}</span>
-              </button>
-            </div>
-
-            <div className="qr-wrapper">
-              <Suspense fallback={<div style={{ width: 140, height: 140 }} />}>
-                <QRCodeDisplay value={generateRoomUrl()} size={140} />
-              </Suspense>
-            </div>
+            ) : (
+              <>
+                <div className="code-card">
+                  <span className="code-label">{t.shareCode}</span>
+                  <div className="code-huge" onClick={handleCopyLink}>
+                    {roomId}
+                  </div>
+                  <button className="btn-copy" onClick={handleCopyLink}>
+                    {copied ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copied ? t.copied : t.copyLink}</span>
+                  </button>
+                </div>
+                <div className="qr-wrapper">
+                  <Suspense fallback={<div style={{ width: 140, height: 140 }} />}>
+                    <QRCodeDisplay value={generateRoomUrl()} size={140} />
+                  </Suspense>
+                </div>
+              </>
+            )}
 
             <div className="status-indicator pulse">
               <span className="dot"></span>
