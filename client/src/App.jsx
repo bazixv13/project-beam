@@ -175,7 +175,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.15';
+const APP_VERSION = 'v1.3.17';
 
 function BrandTitle({ onGoHome, homeLabel }) {
   const [hovered, setHovered] = useState(false);
@@ -269,9 +269,9 @@ function useMorseEasterEgg() {
       if (morseTimeout.current) clearTimeout(morseTimeout.current);
       morseTimeout.current = setTimeout(() => { morseBuffer.current = ''; }, 4000);
 
-      // Check if buffer ends with the P2P morse sequence (or just P for easier testing)
+      // Check if buffer ends with the P2P morse sequence
       const buf = morseBuffer.current;
-      if (buf.endsWith(MORSE_TARGET) || buf.endsWith('.--.··---.--.') || buf.endsWith('...')) {
+      if (buf.endsWith(MORSE_TARGET) || buf.endsWith('.--.··---.--.')) {
         morseBuffer.current = '';
         setMatrixActive(true);
         setTimeout(() => setMatrixActive(false), 6000);
@@ -322,7 +322,7 @@ function MatrixRain() {
     const draw = () => {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
       ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = '#0f0';
+      ctx.fillStyle = '#a1a1aa'; // Monochrome (grey/white) matrix rain
       ctx.font = '14px monospace';
       for (let i = 0; i < cols; i++) {
         const ch = chars[Math.floor(Math.random() * chars.length)];
