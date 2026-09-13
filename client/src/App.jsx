@@ -308,7 +308,7 @@ function MatrixRain() {
     let animId;
     let w, h, cols, drops;
 
-    const chars = 'BEAM P2P WEBRTC 01 .--.··---.--. ⚡🔗'.split('');
+    const chars = 'BEAM P2P WEBRTC 01 .--.··---.--.'.split('');
 
     const resize = () => {
       w = canvas.width = window.innerWidth;
