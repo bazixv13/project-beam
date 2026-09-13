@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check } from 'lucide-react';
+import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check, Settings, Home } from 'lucide-react';
 import { WebRTCConnection } from './webrtc';
 import './index.css';
 
@@ -43,7 +43,14 @@ const dict = {
     p2pDesc: 'Files transfer directly between devices without touching the server. Fully end-to-end encrypted (DTLS).',
     fallbackTitle: 'Relay Fallback (WebSocket)',
     fallbackDesc: 'Direct P2P was blocked by firewalls or NAT. Data streams safely in RAM through the encrypted server and is never stored.',
-    handshakingP2p: 'Negotiating direct P2P upgrade…'
+    handshakingP2p: 'Negotiating direct P2P upgrade…',
+    sharedReady: 'Shared file ready — join a room to send it',
+    settings: 'Settings',
+    transferMode: 'Transfer Mode',
+    modeP2P: 'Direct P2P (WebRTC)',
+    modeRelay: 'Server Relay (WebSocket)',
+    showSvgFrame: 'Show SVG Frame',
+    goHome: 'Back to lobby'
   },
   pl: {
     title: 'Beam',
@@ -80,7 +87,14 @@ const dict = {
     p2pDesc: 'Pliki przesyłane są bezpośrednio między urządzeniami bez udziału serwera. Szyfrowanie end-to-end (DTLS).',
     fallbackTitle: 'Przekaźnik Fallback (WebSocket)',
     fallbackDesc: 'Połączenie P2P zostało zablokowane przez zaporę lub NAT. Dane są bezpiecznie przesyłane w pamięci RAM serwera i nie są zapisywane.',
-    handshakingP2p: 'Negocjowanie bezpośredniego P2P…'
+    handshakingP2p: 'Negocjowanie bezpośredniego P2P…',
+    sharedReady: 'Udostępniony plik gotowy — dołącz do pokoju, aby go wysłać',
+    settings: 'Ustawienia',
+    transferMode: 'Tryb transferu',
+    modeP2P: 'Bezpośrednie P2P (WebRTC)',
+    modeRelay: 'Przez serwer (WebSocket)',
+    showSvgFrame: 'Pokaż ramkę SVG',
+    goHome: 'Wróć do lobby'
   }
 };
 
@@ -163,35 +177,174 @@ function getInitialRoomState() {
 
 const APP_VERSION = 'v1.3.20';
 
-function BrandTitle() {
-  const [showVersion, setShowVersion] = useState(false);
+function BrandTitle({ onGoHome, homeLabel }) {
+  const [hovered, setHovered] = useState(false);
   const revertTimer = useRef(null);
 
   const handleMouseEnter = () => {
-    setShowVersion(true);
+    setHovered(true);
     if (revertTimer.current) clearTimeout(revertTimer.current);
     revertTimer.current = setTimeout(() => {
-      setShowVersion(false);
-    }, 4000);
+      setHovered(false);
+    }, 6000);
   };
 
   const handleMouseLeave = () => {
     if (revertTimer.current) clearTimeout(revertTimer.current);
-    setShowVersion(false);
+    setHovered(false);
   };
 
   useEffect(() => () => { if (revertTimer.current) clearTimeout(revertTimer.current); }, []);
 
   return (
     <span
-      className={`brand-title${showVersion ? ' brand-title--version' : ''}`}
+      className={`brand-title${hovered ? ' brand-title--version' : ''}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      aria-label={showVersion ? APP_VERSION : 'BEAM'}
+      onClick={(e) => { e.stopPropagation(); onGoHome?.(); }}
+      aria-label={hovered ? APP_VERSION : 'BEAM'}
+      style={{ cursor: 'pointer' }}
     >
       <span className="brand-title__beam">BEAM</span>
-      <span className="brand-title__version">{APP_VERSION}</span>
+      <span className="brand-title__version">
+        {APP_VERSION}
+        <button
+          className="brand-home-btn"
+          onClick={(e) => { e.stopPropagation(); onGoHome?.(); }}
+          title={homeLabel || 'Home'}
+          aria-label={homeLabel || 'Home'}
+        >
+          <Home size={13} />
+        </button>
+      </span>
     </span>
+  );
+}
+
+// ============ MORSE CODE EASTER EGG (MOUSE) ============
+// Short click (<300ms) = '.' (dit), long press (>=300ms) = '-' (dah).
+// Spell P2P in Morse: .--. ..--- .--. → triggers matrix rain effect.
+// Visual ripple circles appear at click position as feedback.
+const MORSE_TARGET = '.--...---.--.';
+
+function useMorseEasterEgg() {
+  const [matrixActive, setMatrixActive] = useState(false);
+  const [ripples, setRipples] = useState([]);
+  const morseBuffer = useRef('');
+  const morseTimeout = useRef(null);
+  const mouseDownTime = useRef(0);
+
+  useEffect(() => {
+    const handleMouseDown = (e) => {
+      // Ignore clicks on inputs, buttons, etc. to avoid interference
+      if (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'A'].includes(e.target.tagName)) return;
+      if (e.target.closest('.brand-home-btn') || e.target.closest('.btn-icon') || e.target.closest('button')) return;
+      
+      mouseDownTime.current = Date.now();
+    };
+
+    const handleMouseUp = (e) => {
+      if (!mouseDownTime.current) return;
+      
+      const duration = Date.now() - mouseDownTime.current;
+      mouseDownTime.current = 0;
+
+      // Threshold: 250ms. < 250ms is dit (.), >= 250ms is dah (-)
+      const char = duration < 250 ? '.' : '-';
+      morseBuffer.current += char;
+
+      // Add visual ripple
+      const newRipple = {
+        id: Date.now() + Math.random(),
+        x: e.clientX,
+        y: e.clientY,
+        type: char === '.' ? 'dit' : 'dah'
+      };
+      setRipples(prev => [...prev, newRipple]);
+      setTimeout(() => {
+        setRipples(prev => prev.filter(r => r.id !== newRipple.id));
+      }, 800); // Remove after animation completes
+
+      if (morseTimeout.current) clearTimeout(morseTimeout.current);
+      morseTimeout.current = setTimeout(() => { morseBuffer.current = ''; }, 4000);
+
+      // Check if buffer ends with the P2P morse sequence
+      const buf = morseBuffer.current;
+      if (buf.endsWith(MORSE_TARGET) || buf.endsWith('.--.··---.--.')) {
+        morseBuffer.current = '';
+        setMatrixActive(true);
+        setTimeout(() => setMatrixActive(false), 6000);
+      }
+    };
+
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('mouseup', handleMouseUp);
+    
+    // Also support touch devices
+    window.addEventListener('touchstart', handleMouseDown, { passive: true });
+    window.addEventListener('touchend', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchstart', handleMouseDown);
+      window.removeEventListener('touchend', handleMouseUp);
+      if (morseTimeout.current) clearTimeout(morseTimeout.current);
+    };
+  }, []);
+
+  return { matrixActive, ripples };
+}
+
+// Matrix rain canvas component
+function MatrixRain() {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let animId;
+    let w, h, cols, drops;
+
+    const chars = 'BEAM P2P WEBRTC 01 .--.··---.--.'.split('');
+
+    const resize = () => {
+      w = canvas.width = window.innerWidth;
+      h = canvas.height = window.innerHeight;
+      cols = Math.floor(w / 16);
+      drops = new Array(cols).fill(1);
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const draw = () => {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#a1a1aa'; // Monochrome (grey/white) matrix rain
+      ctx.font = '14px monospace';
+      for (let i = 0; i < cols; i++) {
+        const ch = chars[Math.floor(Math.random() * chars.length)];
+        ctx.fillText(ch, i * 16, drops[i] * 16);
+        if (drops[i] * 16 > h && Math.random() > 0.975) drops[i] = 0;
+        drops[i]++;
+      }
+      animId = requestAnimationFrame(draw);
+    };
+    draw();
+
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener('resize', resize);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="matrix-rain"
+      aria-hidden="true"
+    />
   );
 }
 
@@ -217,6 +370,14 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [transferMode, setTransferMode] = useState('p2p'); // 'p2p' | 'fallback'
   const [p2pHandshaking, setP2pHandshaking] = useState(false);
+  
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [forceRelay, setForceRelay] = useState(() => {
+    return localStorage.getItem('forceRelay') === 'true';
+  });
+  const [showSvgFrame, setShowSvgFrame] = useState(() => {
+    return localStorage.getItem('showSvgFrame') !== 'false';
+  });
 
   // Independent send and receive states for concurrent bidirectional transfer
   const [sendProgress, setSendProgress] = useState({
@@ -261,6 +422,17 @@ function App() {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem('forceRelay', forceRelay);
+    if (forceRelay && transferMode === 'p2p') {
+      // Re-init WebRTC to force relay if changed mid-session, though normally users change this before connecting
+    }
+  }, [forceRelay]);
+
+  useEffect(() => {
+    localStorage.setItem('showSvgFrame', showSvgFrame);
+  }, [showSvgFrame]);
 
   useEffect(() => {
     const handleUnload = () => {
@@ -310,6 +482,8 @@ function App() {
     };
   }, [connectionState]);
 
+  const { matrixActive, ripples } = useMorseEasterEgg();
+
   const toggleTheme = () => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
   };
@@ -323,6 +497,7 @@ function App() {
     webrtc.current = new WebRTCConnection({
       roomId: id,
       isInitiator: isInit,
+      forceRelay: forceRelay,
       onHandshakeStateChange: (isHandshaking) => {
         setP2pHandshaking(isHandshaking);
       },
@@ -741,6 +916,64 @@ function App() {
 
   const inRoom = connectionState !== 'disconnected';
 
+  // Web Share Target: pick up files shared from the Android share sheet.
+  // The service worker stashes them in IndexedDB ('beam-share') and redirects
+  // here with ?share-target. We stage them on the home screen so the user
+  // just creates/joins a room and hits Send. Runs once on mount.
+  useEffect(() => {
+    if (!window.location.search.includes('share-target')) return;
+    // Strip the marker immediately so refresh/back doesn't re-trigger.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('share-target');
+      const rest = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    } catch (_) {}
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const files = await new Promise((resolve, reject) => {
+          const req = indexedDB.open('beam-share', 1);
+          req.onupgradeneeded = () => req.result.createObjectStore('files');
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction('files', 'readwrite');
+            const store = tx.objectStore('files');
+            const get = store.get('shared-files');
+            get.onsuccess = () => {
+              store.delete('shared-files');
+              resolve(get.result || []);
+            };
+            get.onerror = () => reject(get.error);
+            tx.oncomplete = () => db.close();
+          };
+          req.onerror = () => reject(req.error);
+        });
+        if (cancelled || !files || files.length === 0) return;
+        const valid = files.filter((f) => f && typeof f.name === 'string' && f.size > 0);
+        if (valid.length === 0) return;
+        setSendProgress({
+          active: false,
+          paused: false,
+          completed: false,
+          fileName: '',
+          fileSize: 0,
+          bytesTransferred: 0,
+          percent: 0,
+          speed: 0,
+          eta: 0
+        });
+        if (valid.length === 1) {
+          setSelectedFile(valid[0]);
+        } else {
+          zipFilesAndSetState(valid.map((file) => ({ file, path: file.name })), 'shared-files.zip');
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div 
       className={`app-shell ${isDragging ? 'is-dragging' : ''}`}
@@ -752,6 +985,18 @@ function App() {
         if (inRoom) handleDrop(e);
       }}
     >
+      {/* Morse Easter Egg: Matrix Rain */}
+      {matrixActive && <MatrixRain />}
+      
+      {/* Morse Easter Egg: Ripples */}
+      {ripples.map(r => (
+        <div 
+          key={r.id} 
+          className={`morse-ripple ${r.type}`} 
+          style={{ left: r.x, top: r.y }} 
+        />
+      ))}
+
       {showScanner && (
         <Suspense fallback={null}>
           <QRScanner 
@@ -765,7 +1010,7 @@ function App() {
       {/* Brutalist Top Header */}
       <header className="app-header">
         <div className="brand">
-          <BrandTitle />
+          <BrandTitle onGoHome={inRoom ? handleLeaveRoom : () => window.location.reload()} homeLabel={t.goHome} />
           {inRoom && connectionState === 'connected' && (
             <div className={`mode-badge-wrapper ${transferMode}`} tabIndex={0}>
               <span className="mode-indicator">
@@ -828,13 +1073,61 @@ function App() {
           >
             <span>{lang.toUpperCase()}</span>
           </button>
+
+          <button 
+            className="btn-icon" 
+            onClick={() => setShowSettingsModal(true)}
+            title={t.settings}
+            aria-label={t.settings}
+          >
+            <Settings size={16} />
+          </button>
         </div>
       </header>
 
-      {/* No-Internet Banner */}
-      {isOffline && (
-        <div className="offline-banner" role="alert">
-          <span>{t.noInternet}</span>
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="settings-modal-overlay" onClick={() => setShowSettingsModal(false)}>
+          <div className="settings-modal" onClick={e => e.stopPropagation()}>
+            <div className="settings-header">
+              <h3>{t.settings}</h3>
+              <button className="btn-icon" onClick={() => setShowSettingsModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="settings-body">
+              <div className="setting-item">
+                <div className="setting-info">
+                  <span>{t.transferMode}</span>
+                </div>
+                <select 
+                  className="setting-select" 
+                  value={forceRelay ? 'relay' : 'p2p'} 
+                  onChange={e => {
+                    setForceRelay(e.target.value === 'relay');
+                  }}
+                >
+                  <option value="p2p">{t.modeP2P}</option>
+                  <option value="relay">{t.modeRelay}</option>
+                </select>
+              </div>
+
+              <div className="setting-item">
+                <div className="setting-info">
+                  <span>{t.showSvgFrame}</span>
+                </div>
+                <label className="toggle-switch">
+                  <input 
+                    type="checkbox" 
+                    checked={showSvgFrame} 
+                    onChange={e => setShowSvgFrame(e.target.checked)} 
+                  />
+                  <span className="slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -844,6 +1137,38 @@ function App() {
         {/* Disconnected: Simple clean 2-char code connection */}
         {connectionState === 'disconnected' && (
           <div className="view-flow">
+            {/* File shared from the Android share sheet — staged, waiting for a room */}
+            {selectedFile && !sendProgress.active && !isZipping && (
+              <div className="staged-file">
+                <div className="staged-details">
+                  <div className="staged-title-row">
+                    <p className="staged-name">{selectedFile.name}</p>
+                  </div>
+                  <p className="staged-meta">
+                    {formatSize(selectedFile.size)} • {t.sharedReady}
+                  </p>
+                </div>
+                <div className="staged-buttons">
+                  <button className="btn-icon" onClick={handleCancelFile} title={t.cancel}>
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Shared multi-file zip being compressed */}
+            {isZipping && (
+              <div className="transfer-strip zipping">
+                <div className="strip-info">
+                  <span className="strip-type">{t.zipping}</span>
+                  <span className="strip-title">{zipProgress}%</span>
+                </div>
+                <div className="meter-track">
+                  <div className="meter-fill" style={{ width: `${zipProgress}%` }} />
+                </div>
+              </div>
+            )}
+
             <button onClick={handleCreateRoom} className="btn-solid">
               <span>{t.createRoom}</span>
             </button>
@@ -889,22 +1214,68 @@ function App() {
         {/* Connecting: Share 2-Char Room Code + QR */}
         {connectionState === 'connecting' && (
           <div className="view-flow connect-flow">
-            <div className="code-card">
-              <span className="code-label">{t.shareCode}</span>
-              <div className="code-huge" onClick={handleCopyLink}>
-                {roomId}
+            {showSvgFrame && _isInitiator ? (
+              <div className="svg-frame-wrapper">
+                <svg className="room-svg-bg" width="407" height="458" viewBox="0 0 407 458" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M82.543 33H58.5L91.5 0H115.543L82.543 33Z" fill="white"/>
+                  <path d="M113.543 33H89.5L122.5 0H146.543L113.543 33Z" fill="white"/>
+                  <path d="M51.5322 33H27.5L60.4756 0H84.5068L51.5322 33Z" fill="white"/>
+                  <path d="M304.29 446H232.315L239.315 439H311.29L304.29 446Z" fill="white"/>
+                  <path d="M407 37.9648V421.035L374.535 453.5H224.815L229.815 448.5H372.465L402 418.965V40.0352L367.465 5.5H154.035L118.035 41.5H24.0352L5 60.5352V411.965L45.5352 452.5H189.465L210.965 431H319.291L314.291 436H213.035L191.535 457.5H43.4648L0 414.035V58.4648L21.9648 36.5H115.965L151.965 0.5H369.535L407 37.9648Z" fill="var(--text-main)"/>
+                  <rect x="244.107" y="437" width="1.94331" height="13.9629" transform="rotate(45 244.107 437)" fill="var(--bg-app)"/>
+                  <rect x="249.689" y="436.684" width="1.94331" height="14.5882" transform="rotate(45 249.689 436.684)" fill="var(--bg-app)"/>
+                  <rect x="254.373" y="437" width="1.94331" height="13.9629" transform="rotate(45 254.373 437)" fill="var(--bg-app)"/>
+                  <rect x="259.909" y="436.731" width="1.94331" height="14.183" transform="rotate(45 259.909 436.731)" fill="var(--bg-app)"/>
+                  <rect x="264.373" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 264.373 437.316)" fill="var(--bg-app)"/>
+                  <rect x="269.956" y="437" width="1.94331" height="14.5882" transform="rotate(45 269.956 437)" fill="var(--bg-app)"/>
+                  <rect x="274.64" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 274.64 437.316)" fill="var(--bg-app)"/>
+                  <rect x="280.175" y="437.047" width="1.94331" height="14.183" transform="rotate(45 280.175 437.047)" fill="var(--bg-app)"/>
+                  <rect x="285.373" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 285.373 437.316)" fill="var(--bg-app)"/>
+                  <rect x="290.956" y="437" width="1.94331" height="14.5882" transform="rotate(45 290.956 437)" fill="var(--bg-app)"/>
+                  <rect x="295.64" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 295.64 437.316)" fill="var(--bg-app)"/>
+                  <rect x="301.175" y="437.047" width="1.94331" height="14.183" transform="rotate(45 301.175 437.047)" fill="var(--bg-app)"/>
+                  <rect x="306.373" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 306.373 437.316)" fill="var(--bg-app)"/>
+                  <rect x="311.956" y="437" width="1.94331" height="14.5882" transform="rotate(45 311.956 437)" fill="var(--bg-app)"/>
+                  <rect x="316.64" y="437.316" width="1.94331" height="13.9629" transform="rotate(45 316.64 437.316)" fill="var(--bg-app)"/>
+                  <rect x="322.175" y="437.047" width="1.94331" height="14.183" transform="rotate(45 322.175 437.047)" fill="var(--bg-app)"/>
+                </svg>
+                <div className="frame-content">
+                  <div className="code-card">
+                    <span className="code-label">{t.shareCode}</span>
+                    <div className="code-huge" onClick={handleCopyLink}>
+                      {roomId}
+                    </div>
+                    <button className="btn-copy" onClick={handleCopyLink}>
+                      {copied ? <Check size={14} /> : <Copy size={14} />}
+                      <span>{copied ? t.copied : t.copyLink}</span>
+                    </button>
+                  </div>
+                  <div className="qr-wrapper">
+                    <Suspense fallback={<div style={{ width: 140, height: 140 }} />}>
+                      <QRCodeDisplay value={generateRoomUrl()} size={140} />
+                    </Suspense>
+                  </div>
+                </div>
               </div>
-              <button className="btn-copy" onClick={handleCopyLink}>
-                {copied ? <Check size={14} /> : <Copy size={14} />}
-                <span>{copied ? t.copied : t.copyLink}</span>
-              </button>
-            </div>
-
-            <div className="qr-wrapper">
-              <Suspense fallback={<div style={{ width: 140, height: 140 }} />}>
-                <QRCodeDisplay value={generateRoomUrl()} size={140} />
-              </Suspense>
-            </div>
+            ) : (
+              <>
+                <div className="code-card">
+                  <span className="code-label">{t.shareCode}</span>
+                  <div className="code-huge" onClick={handleCopyLink}>
+                    {roomId}
+                  </div>
+                  <button className="btn-copy" onClick={handleCopyLink}>
+                    {copied ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copied ? t.copied : t.copyLink}</span>
+                  </button>
+                </div>
+                <div className="qr-wrapper">
+                  <Suspense fallback={<div style={{ width: 140, height: 140 }} />}>
+                    <QRCodeDisplay value={generateRoomUrl()} size={140} />
+                  </Suspense>
+                </div>
+              </>
+            )}
 
             <div className="status-indicator pulse">
               <span className="dot"></span>
