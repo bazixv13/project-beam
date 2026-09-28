@@ -117,14 +117,14 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.22 */
+     never changes width when swapping BEAM ↔ v1.3.23 */
   display: inline-grid;
   position: relative;
 }
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.22  ⌂';
+  content: 'v1.3.23  ⌂';
   visibility: hidden;
   height: 0;
   overflow: hidden;
@@ -1071,6 +1071,68 @@ body {
 .settings-segmented button.is-active {
   background: var(--btn-bg);
   color: var(--btn-fg);
+}
+
+/* ============ MESSAGE THREAD ============ */
+.msg-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.msg-bubble {
+  max-width: 85%;
+  align-self: flex-start;
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.msg-bubble.mine {
+  align-self: flex-end;
+  background: var(--btn-bg);
+  border-color: var(--btn-bg);
+  color: var(--btn-fg);
+}
+
+.msg-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.msg-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.msg-input:focus {
+  border-color: var(--border-focus);
+}
+
+/* Transient share notices (replaced / missed file) */
+.staged-notice {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.4rem;
 }
 
 .settings-switch {
