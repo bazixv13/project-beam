@@ -721,6 +721,7 @@ export class WebRTCConnection {
     this.receiveFileName = meta.name;
     this.receiveFileSize = meta.size;
     this.receiveFileType = meta.fileType || 'application/octet-stream';
+    this.receiveFileKind = meta.kind || 'file';
     this.receiveSpeed = 0;
     this.receiveLastTime = performance.now();
     this.lastReceiveEmitTime = performance.now();
@@ -748,6 +749,7 @@ export class WebRTCConnection {
     this.onReceiveProgress({
       active: true,
       completed: false,
+      kind: this.receiveFileKind,
       fileName: this.receiveFileName,
       fileSize: this.receiveFileSize,
       bytesTransferred: this.receiveBytes,
@@ -829,6 +831,7 @@ export class WebRTCConnection {
     const name = this.receiveFileName;
     const size = this.receiveFileSize;
     const fileId = this.receiveFileId;
+    const kind = this.receiveFileKind || 'file';
 
     if (this.receiveFileId) {
       this.partialTransfers.delete(this.receiveFileId);
@@ -839,6 +842,7 @@ export class WebRTCConnection {
     this.onReceiveProgress({
       active: false,
       completed: true,
+      kind,
       fileName: name,
       fileSize: size,
       bytesTransferred: size,
@@ -847,12 +851,13 @@ export class WebRTCConnection {
       eta: 0
     });
 
-    this.onFileReceived(finalBlob, name);
+    this.onFileReceived(finalBlob, name, kind);
 
     this.blobParts = [];
     this.receiveFileId = null;
     this.receiveFileName = '';
     this.receiveFileSize = 0;
+    this.receiveFileKind = 'file';
     this.receiveBytes = 0;
 
     if (this.pendingUpgrade) {
@@ -866,6 +871,7 @@ export class WebRTCConnection {
     this.receiveBatch = [];
     this.receiveBatchBytes = 0;
     this.receiveBytes = 0;
+    this.receiveFileKind = 'file';
     if (this.receiveFileId) {
       this.partialTransfers.delete(this.receiveFileId);
       this.receiveFileId = null;
@@ -887,7 +893,7 @@ export class WebRTCConnection {
     });
   }
 
-  async sendFile(file) {
+  async sendFile(file, kind = 'file') {
     if (!this.isConnected || this.isSending) return;
     this.isSending = true;
     this.abortSending = false;
@@ -910,7 +916,8 @@ export class WebRTCConnection {
       fileId,
       name: file.name,
       size: file.size,
-      fileType: file.type
+      fileType: file.type,
+      kind
     });
 
     const startOffset = await ackPromise;
@@ -929,6 +936,7 @@ export class WebRTCConnection {
       active: true,
       paused: false,
       completed: false,
+      kind,
       fileName: file.name,
       fileSize: file.size,
       bytesTransferred: offset,
@@ -1108,6 +1116,7 @@ export class WebRTCConnection {
           active: false,
           paused: false,
           completed: true,
+          kind,
           fileName: file.name,
           fileSize: file.size,
           bytesTransferred: file.size,

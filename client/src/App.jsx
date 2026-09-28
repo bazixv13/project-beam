@@ -45,12 +45,18 @@ const dict = {
     fallbackDesc: 'Direct P2P was blocked by firewalls or NAT. Data streams safely in RAM through the encrypted server and is never stored.',
     handshakingP2p: 'Negotiating direct P2P upgrade…',
     sharedReady: 'Shared file ready — join a room to send it',
+    sharedReplaced: 'Shared file replaced the staged file',
+    shareMissed: 'Shared file didn’t arrive — please share again',
+    messagePlaceholder: 'Type a message…',
+    sendMessage: 'Send',
     settings: 'Settings',
     transferMode: 'Transfer Mode',
     modeP2P: 'Direct P2P (WebRTC)',
     modeRelay: 'Server Relay (WebSocket)',
     showSvgFrame: 'Show SVG Frame',
     touchFx: 'Touch FX',
+    logoRefresh: 'Logo Refresh',
+    logoHome: 'Home Button',
     language: 'Language',
     goHome: 'Back to lobby'
   },
@@ -91,12 +97,18 @@ const dict = {
     fallbackDesc: 'Połączenie P2P zostało zablokowane przez zaporę lub NAT. Dane są bezpiecznie przesyłane w pamięci RAM serwera i nie są zapisywane.',
     handshakingP2p: 'Negocjowanie bezpośredniego P2P…',
     sharedReady: 'Udostępniony plik gotowy — dołącz do pokoju, aby go wysłać',
+    sharedReplaced: 'Udostępniony plik zastąpił przygotowany plik',
+    shareMissed: 'Plik nie dotarł — udostępnij ponownie',
+    messagePlaceholder: 'Napisz wiadomość…',
+    sendMessage: 'Wyślij',
     settings: 'Ustawienia',
     transferMode: 'Tryb transferu',
     modeP2P: 'Bezpośrednie P2P (WebRTC)',
     modeRelay: 'Przez serwer (WebSocket)',
     showSvgFrame: 'Pokaż ramkę SVG',
     touchFx: 'Efekty dotyku',
+    logoRefresh: 'Odświeżanie logo',
+    logoHome: 'Przycisk Home',
     language: 'Język',
     goHome: 'Wróć do lobby'
   }
@@ -179,9 +191,9 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.22';
+const APP_VERSION = 'v1.3.23';
 
-function BrandTitle({ onGoHome, homeLabel }) {
+function BrandTitle({ onGoHome, homeLabel, logoRefresh = true, logoHome = true }) {
   const [hovered, setHovered] = useState(false);
   const revertTimer = useRef(null);
 
@@ -205,21 +217,23 @@ function BrandTitle({ onGoHome, homeLabel }) {
       className={`brand-title${hovered ? ' brand-title--version' : ''}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onClick={(e) => { e.stopPropagation(); onGoHome?.(); }}
+      onClick={logoRefresh ? (e) => { e.stopPropagation(); onGoHome?.(); } : undefined}
       aria-label={hovered ? APP_VERSION : 'BEAM'}
-      style={{ cursor: 'pointer' }}
+      style={logoRefresh ? { cursor: 'pointer' } : undefined}
     >
       <span className="brand-title__beam">BEAM</span>
       <span className="brand-title__version">
         {APP_VERSION}
-        <button
-          className="brand-home-btn"
-          onClick={(e) => { e.stopPropagation(); onGoHome?.(); }}
-          title={homeLabel || 'Home'}
-          aria-label={homeLabel || 'Home'}
-        >
-          <Home size={13} />
-        </button>
+        {logoHome && (
+          <button
+            className="brand-home-btn"
+            onClick={(e) => { e.stopPropagation(); onGoHome?.(); }}
+            title={homeLabel || 'Home'}
+            aria-label={homeLabel || 'Home'}
+          >
+            <Home size={13} />
+          </button>
+        )}
       </span>
     </span>
   );
@@ -406,6 +420,17 @@ function App() {
   const [touchFx, setTouchFx] = useState(() => {
     return localStorage.getItem('touchFx') !== 'false';
   });
+  const [logoRefresh, setLogoRefresh] = useState(() => {
+    return localStorage.getItem('logoRefresh') !== 'false';
+  });
+  const [logoHome, setLogoHome] = useState(() => {
+    return localStorage.getItem('logoHome') !== 'false';
+  });
+  const [messages, setMessages] = useState([]);
+  const [messageInput, setMessageInput] = useState('');
+  const [shareNotice, setShareNotice] = useState('');
+  const sendingTextRef = useRef(null);
+  const shareNoticeTimer = useRef(null);
 
   // Independent send and receive states for concurrent bidirectional transfer
   const [sendProgress, setSendProgress] = useState({
@@ -465,6 +490,22 @@ function App() {
   useEffect(() => {
     localStorage.setItem('touchFx', touchFx);
   }, [touchFx]);
+
+  useEffect(() => {
+    localStorage.setItem('logoRefresh', logoRefresh);
+  }, [logoRefresh]);
+
+  useEffect(() => {
+    localStorage.setItem('logoHome', logoHome);
+  }, [logoHome]);
+
+  useEffect(() => () => { if (shareNoticeTimer.current) clearTimeout(shareNoticeTimer.current); }, []);
+
+  const flashShareNotice = (text) => {
+    setShareNotice(text);
+    if (shareNoticeTimer.current) clearTimeout(shareNoticeTimer.current);
+    shareNoticeTimer.current = setTimeout(() => setShareNotice(''), 4000);
+  };
 
   // Close the settings panel on Escape
   useEffect(() => {
@@ -568,6 +609,20 @@ function App() {
         }
       },
       onSendProgress: (progress) => {
+        // Text messages travel the file pipeline but render as chat bubbles,
+        // never as transfer strips — only completion matters here.
+        if (progress.kind === 'text') {
+          if (progress.completed && sendingTextRef.current) {
+            setMessages((prev) => [...prev, {
+              id: `m-${Date.now()}-${prev.length}`,
+              text: sendingTextRef.current,
+              mine: true,
+              time: Date.now()
+            }]);
+            sendingTextRef.current = null;
+          }
+          return;
+        }
         if (progress.active) {
           setConnectionState('connected');
         }
@@ -595,6 +650,7 @@ function App() {
         }
       },
       onReceiveProgress: (progress) => {
+        if (progress.kind === 'text') return;
         if (progress.active) {
           setConnectionState('connected');
         }
@@ -616,7 +672,18 @@ function App() {
           }, 4000);
         }
       },
-      onFileReceived: (blob, name) => {
+      onFileReceived: (blob, name, kind) => {
+        if (kind === 'text') {
+          blob.text().then((text) => {
+            setMessages((prev) => [...prev, {
+              id: `m-${Date.now()}-${prev.length}`,
+              text,
+              mine: false,
+              time: Date.now()
+            }]);
+          }).catch(() => {});
+          return;
+        }
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -815,6 +882,16 @@ function App() {
     }
   };
 
+  const handleSendText = () => {
+    const text = messageInput.trim();
+    if (!text || !webrtc.current || connectionState !== 'connected') return;
+    if (webrtc.current.isSending) return;
+    const file = new File([new TextEncoder().encode(text)], `message-${Date.now()}.txt`, { type: 'text/plain' });
+    sendingTextRef.current = text;
+    setMessageInput('');
+    webrtc.current.sendFile(file, 'text');
+  };
+
   // Announce the native file picker to the peer *before* it opens so the
   // peer extends our silence allowance while OS picker freezes our timers.
   // closeFilePicker runs on change, cancel, and window-focus fallback.
@@ -960,60 +1037,93 @@ function App() {
 
   // Web Share Target: pick up files shared from the Android share sheet.
   // The service worker stashes them in IndexedDB ('beam-share') and redirects
-  // here with ?share-target. We stage them on the home screen so the user
-  // just creates/joins a room and hits Send. Runs once on mount.
+  // here with ?share-target. Stability rules (share state used to vanish):
+  // - read IndexedDB BEFORE stripping the marker; strip only after staging
+  // - retry empty reads (SW commit vs page-load race)
+  // - pick up orphaned keys even without the marker
+  // - replacing an already-staged file shows a notice, never a silent swap
+  // - marker present but nothing arrives (no-SW fallback) shows a notice
   useEffect(() => {
-    if (!window.location.search.includes('share-target')) return;
-    // Strip the marker immediately so refresh/back doesn't re-trigger.
-    try {
-      const params = new URLSearchParams(window.location.search);
-      params.delete('share-target');
-      const rest = params.toString();
-      window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
-    } catch (_) {}
-
+    const hasMarker = window.location.search.includes('share-target');
     let cancelled = false;
-    (async () => {
+
+    const readSharedFiles = () => new Promise((resolve, reject) => {
+      const req = indexedDB.open('beam-share', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('files');
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction('files', 'readwrite');
+        const store = tx.objectStore('files');
+        const get = store.get('shared-files');
+        get.onsuccess = () => {
+          store.delete('shared-files');
+          resolve(get.result || []);
+        };
+        get.onerror = () => reject(get.error);
+        tx.oncomplete = () => db.close();
+      };
+      req.onerror = () => reject(req.error);
+    });
+
+    const stripMarker = () => {
       try {
-        const files = await new Promise((resolve, reject) => {
-          const req = indexedDB.open('beam-share', 1);
-          req.onupgradeneeded = () => req.result.createObjectStore('files');
-          req.onsuccess = () => {
-            const db = req.result;
-            const tx = db.transaction('files', 'readwrite');
-            const store = tx.objectStore('files');
-            const get = store.get('shared-files');
-            get.onsuccess = () => {
-              store.delete('shared-files');
-              resolve(get.result || []);
-            };
-            get.onerror = () => reject(get.error);
-            tx.oncomplete = () => db.close();
-          };
-          req.onerror = () => reject(req.error);
-        });
-        if (cancelled || !files || files.length === 0) return;
-        const valid = files.filter((f) => f && typeof f.name === 'string' && f.size > 0);
-        if (valid.length === 0) return;
-        setSendProgress({
-          active: false,
-          paused: false,
-          completed: false,
-          fileName: '',
-          fileSize: 0,
-          bytesTransferred: 0,
-          percent: 0,
-          speed: 0,
-          eta: 0
-        });
-        if (valid.length === 1) {
-          setSelectedFile(valid[0]);
-        } else {
-          zipFilesAndSetState(valid.map((file) => ({ file, path: file.name })), 'shared-files.zip');
-        }
+        const params = new URLSearchParams(window.location.search);
+        if (!params.has('share-target')) return;
+        params.delete('share-target');
+        const rest = params.toString();
+        window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
       } catch (_) {}
+    };
+
+    (async () => {
+      let files = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          files = await readSharedFiles();
+        } catch (_) {
+          files = [];
+        }
+        if (cancelled) return;
+        if (files && files.length > 0) break;
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 500));
+      }
+      if (cancelled) return;
+      const valid = (files || []).filter((f) => f && typeof f.name === 'string' && f.size > 0);
+      if (valid.length === 0) {
+        // Marker but no files: SW wasn't controlling (first install / hard
+        // refresh) and the server fallback dropped the body — say so loudly.
+        if (hasMarker) {
+          stripMarker();
+          flashShareNotice(t.shareMissed);
+        }
+        return;
+      }
+      setSendProgress({
+        active: false,
+        paused: false,
+        completed: false,
+        fileName: '',
+        fileSize: 0,
+        bytesTransferred: 0,
+        percent: 0,
+        speed: 0,
+        eta: 0
+      });
+      let replaceNoticed = false;
+      setSelectedFile((prev) => {
+        if (prev && !replaceNoticed) {
+          replaceNoticed = true;
+          setTimeout(() => flashShareNotice(t.sharedReplaced));
+        }
+        return valid.length === 1 ? valid[0] : prev;
+      });
+      if (valid.length > 1) {
+        zipFilesAndSetState(valid.map((file) => ({ file, path: file.name })), 'shared-files.zip');
+      }
+      stripMarker();
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -1052,7 +1162,7 @@ function App() {
       {/* Brutalist Top Header */}
       <header className="app-header">
         <div className="brand">
-          <BrandTitle onGoHome={inRoom ? handleLeaveRoom : () => window.location.reload()} homeLabel={t.goHome} />
+          <BrandTitle onGoHome={inRoom ? handleLeaveRoom : () => window.location.reload()} homeLabel={t.goHome} logoRefresh={logoRefresh} logoHome={logoHome} />
           {inRoom && connectionState === 'connected' && (
             <div className={`mode-badge-wrapper ${transferMode}`} tabIndex={0}>
               <span className="mode-indicator">
@@ -1191,6 +1301,28 @@ function App() {
                       <span className="settings-knob"></span>
                     </label>
                   </div>
+                  <div className="settings-row">
+                    <span>{t.logoRefresh}</span>
+                    <label className="settings-switch">
+                      <input
+                        type="checkbox"
+                        checked={logoRefresh}
+                        onChange={e => setLogoRefresh(e.target.checked)}
+                      />
+                      <span className="settings-knob"></span>
+                    </label>
+                  </div>
+                  <div className="settings-row">
+                    <span>{t.logoHome}</span>
+                    <label className="settings-switch">
+                      <input
+                        type="checkbox"
+                        checked={logoHome}
+                        onChange={e => setLogoHome(e.target.checked)}
+                      />
+                      <span className="settings-knob"></span>
+                    </label>
+                  </div>
                 </div>
               </div>
             )}
@@ -1220,6 +1352,9 @@ function App() {
                   <p className="staged-meta">
                     {formatSize(selectedFile.size)} • {t.sharedReady}
                   </p>
+                  {shareNotice && (
+                    <p className="staged-notice">{shareNotice}</p>
+                  )}
                 </div>
                 <div className="staged-buttons">
                   <button className="btn-icon" onClick={handleCancelFile} title={t.cancel}>
@@ -1227,6 +1362,9 @@ function App() {
                   </button>
                 </div>
               </div>
+            )}
+            {!selectedFile && !sendProgress.active && !isZipping && shareNotice && (
+              <p className="staged-notice">{shareNotice}</p>
             )}
 
             {/* Shared multi-file zip being compressed */}
@@ -1360,6 +1498,32 @@ function App() {
         {/* Connected: Full-Featured Bidirectional Transfer Workspace */}
         {connectionState === 'connected' && (
           <div className="view-flow transfer-flow">
+
+            {/* Message thread */}
+            {messages.length > 0 && (
+              <div className="msg-thread" aria-live="polite">
+                {messages.map((m) => (
+                  <div key={m.id} className={`msg-bubble${m.mine ? ' mine' : ''}`}>
+                    {m.text}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="msg-input-row">
+              <input
+                className="msg-input"
+                value={messageInput}
+                onChange={(e) => setMessageInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSendText(); }}
+                placeholder={t.messagePlaceholder}
+                aria-label={t.messagePlaceholder}
+                maxLength={100000}
+              />
+              <button className="btn-solid btn-compact" onClick={handleSendText} aria-label={t.sendMessage}>
+                <Send size={16} />
+                <span>{t.sendMessage}</span>
+              </button>
+            </div>
 
             {/* Incoming Receiving Transfer (Concurrent) */}
             {(receiveProgress.active || receiveProgress.completed) && (
