@@ -1,0 +1,75 @@
+name: Deploy Media Service Dev (beam-media)
+
+# Standalone private video library. Shares nothing with the BEAM app.
+# OWNER SETUP REQUIRED once on the server (not done by this workflow):
+#   1. systemd unit beam-media-dev.service running /opt/beam-media-dev/beam-media
+#      with Environment="MEDIA_DIR=/opt/beam-media-dev/media" "PORT=3002"
+#      and EnvironmentFile holding UPLOAD_PASSWORD (never commit the secret).
+#   2. Reverse proxy (Caddy) routing a host/path to 127.0.0.1:3002,
+#      then set VITE_MEDIA_URL for the client build so the header button appears.
+#   3. Reuse the existing SSH_PRIVATE_KEY / REMOTE_USER / REMOTE_HOST secrets.
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'media/**'
+      - '.github/workflows/deploy-media.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-media-dev
+  cancel-in-progress: true
+
+jobs:
+  build-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: media -> target
+
+      - name: Build Media Binary
+        run: |
+          cd media
+          cargo build --profile dev-release
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-binary
+          path: media/target/dev-release/beam-media
+          retention-days: 1
+
+  deploy:
+    needs: build-backend
+    if: needs.build-backend.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: media-binary
+          path: media-binary
+
+      - name: Configure SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.REMOTE_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy Binary & Restart Service
+        run: |
+          REMOTE="${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}"
+          scp -i ~/.ssh/deploy_key media-binary/beam-media "$REMOTE:/opt/beam-media-dev/beam-media.new"
+          ssh -i ~/.ssh/deploy_key "$REMOTE" "mv /opt/beam-media-dev/beam-media.new /opt/beam-media-dev/beam-media && chmod 0755 /opt/beam-media-dev/beam-media && sudo systemctl restart beam-media-dev.service"
+          echo "Media service restarted"

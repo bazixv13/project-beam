@@ -193,7 +193,7 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.23';
+const APP_VERSION = 'v1.3.24';
 
 function BrandTitle({ onGoHome, homeLabel, logoRefresh = true, logoHome = true }) {
   const [hovered, setHovered] = useState(false);
