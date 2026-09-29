@@ -49,6 +49,7 @@ const dict = {
     shareMissed: 'Shared file didn’t arrive — please share again',
     messagePlaceholder: 'Type a message…',
     sendMessage: 'Send',
+    roomFull: 'Room is occupied — try another code',
     settings: 'Settings',
     transferMode: 'Transfer Mode',
     modeP2P: 'Direct P2P (WebRTC)',
@@ -101,6 +102,7 @@ const dict = {
     shareMissed: 'Plik nie dotarł — udostępnij ponownie',
     messagePlaceholder: 'Napisz wiadomość…',
     sendMessage: 'Wyślij',
+    roomFull: 'Pokój jest zajęty — spróbuj innego kodu',
     settings: 'Ustawienia',
     transferMode: 'Tryb transferu',
     modeP2P: 'Bezpośrednie P2P (WebRTC)',
@@ -428,7 +430,9 @@ function App() {
   });
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState('');
+  const [copiedMsgId, setCopiedMsgId] = useState(null);
   const [shareNotice, setShareNotice] = useState('');
+  const [engineBusy, setEngineBusy] = useState(false);
   const sendingTextRef = useRef(null);
   const shareNoticeTimer = useRef(null);
 
@@ -620,8 +624,10 @@ function App() {
             setMessageInput(sendingTextRef.current);
             sendingTextRef.current = null;
           }
+          setEngineBusy(false);
           return;
         }
+        if (!progress.active) setEngineBusy(false);
         if (progress.active) {
           setConnectionState('connected');
         }
@@ -692,6 +698,10 @@ function App() {
       },
       onOffline: (offline) => {
         setIsOffline(offline);
+      },
+      onRoomFull: () => {
+        handleLeaveRoom();
+        flashShareNotice(t.roomFull);
       }
     });
   };
@@ -782,6 +792,7 @@ function App() {
     setMessages([]);
     setMessageInput('');
     sendingTextRef.current = null;
+    setEngineBusy(false);
   };
 
   const zipFilesAndSetState = async (fileEntries, defaultZipName) => {
@@ -880,8 +891,26 @@ function App() {
   };
 
   const handleSendFile = () => {
-    if (selectedFile && webrtc.current) {
+    if (selectedFile && webrtc.current && !webrtc.current.isSending) {
+      setEngineBusy(true);
       webrtc.current.sendFile(selectedFile);
+    }
+  };
+
+  const handleCopyMessage = (m) => {
+    try {
+      const done = navigator.clipboard?.writeText(m.text);
+      if (done && done.catch) done.catch(() => {});
+    } catch (_) {}
+    setCopiedMsgId(m.id);
+    setTimeout(() => setCopiedMsgId((cur) => (cur === m.id ? null : cur)), 1200);
+  };
+
+  const formatMsgTime = (ts) => {
+    try {
+      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (_) {
+      return '';
     }
   };
 
@@ -894,6 +923,7 @@ function App() {
     const file = new File([new TextEncoder().encode(text)], `message-${Date.now()}.txt`, { type: 'text/plain' });
     sendingTextRef.current = text;
     setMessageInput('');
+    setEngineBusy(true);
     webrtc.current.sendFile(file, 'text');
   };
 
@@ -935,6 +965,7 @@ function App() {
     if (webrtc.current) {
       webrtc.current.cancelSend();
     }
+    setEngineBusy(false);
     setSelectedFile(null);
     setSendProgress({
       active: false,
@@ -1517,8 +1548,17 @@ function App() {
             {messages.length > 0 && (
               <div className="msg-thread" aria-live="polite">
                 {messages.map((m) => (
-                  <div key={m.id} className={`msg-bubble${m.mine ? ' mine' : ''}`}>
-                    {m.text}
+                  <div
+                    key={m.id}
+                    className={`msg-bubble${m.mine ? ' mine' : ''}${copiedMsgId === m.id ? ' copied' : ''}`}
+                    onClick={() => handleCopyMessage(m)}
+                    title={t.copyLink}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCopyMessage(m); }}
+                  >
+                    <span className="msg-text">{m.text}</span>
+                    <span className="msg-time">{formatMsgTime(m.time)}</span>
                   </div>
                 ))}
               </div>
@@ -1533,7 +1573,7 @@ function App() {
                 aria-label={t.messagePlaceholder}
                 maxLength={100000}
               />
-              <button className="btn-solid btn-compact" onClick={handleSendText} aria-label={t.sendMessage}>
+              <button className="btn-solid btn-compact" onClick={handleSendText} aria-label={t.sendMessage} disabled={engineBusy}>
                 <Send size={16} />
                 <span>{t.sendMessage}</span>
               </button>
@@ -1637,7 +1677,7 @@ function App() {
                   </p>
                 </div>
                 <div className="staged-buttons">
-                  <button className="btn-solid btn-compact" onClick={handleSendFile}>
+                  <button className="btn-solid btn-compact" onClick={handleSendFile} disabled={engineBusy}>
                     <Send size={15} />
                     <span>{sendProgress.paused ? t.resume : t.sendFile}</span>
                   </button>
