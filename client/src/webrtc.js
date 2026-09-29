@@ -898,6 +898,7 @@ export class WebRTCConnection {
     this.isSending = true;
     this.abortSending = false;
     this.activeSendingFile = file;
+    this.activeSendingKind = kind;
 
     const fileId = `${file.name}-${file.size}-${file.lastModified}`;
 
@@ -1130,6 +1131,7 @@ export class WebRTCConnection {
     } finally {
       this.isSending = false;
       this.activeSendingFile = null;
+      this.activeSendingKind = null;
       if (this.pendingUpgrade) {
         this.pendingUpgrade = false;
         this.attemptUpgrade();
@@ -1150,6 +1152,7 @@ export class WebRTCConnection {
       active: false,
       paused: false,
       completed: false,
+      kind: this.activeSendingKind || 'file',
       fileName: '',
       fileSize: 0,
       bytesTransferred: 0,

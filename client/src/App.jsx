@@ -613,12 +613,11 @@ function App() {
         // never as transfer strips — only completion matters here.
         if (progress.kind === 'text') {
           if (progress.completed && sendingTextRef.current) {
-            setMessages((prev) => [...prev, {
-              id: `m-${Date.now()}-${prev.length}`,
-              text: sendingTextRef.current,
-              mine: true,
-              time: Date.now()
-            }]);
+            appendMessage(sendingTextRef.current, true);
+            sendingTextRef.current = null;
+          } else if (!progress.active && !progress.completed && sendingTextRef.current) {
+            // Send failed or was cancelled: hand the text back, don't eat it.
+            setMessageInput(sendingTextRef.current);
             sendingTextRef.current = null;
           }
           return;
@@ -675,12 +674,7 @@ function App() {
       onFileReceived: (blob, name, kind) => {
         if (kind === 'text') {
           blob.text().then((text) => {
-            setMessages((prev) => [...prev, {
-              id: `m-${Date.now()}-${prev.length}`,
-              text,
-              mine: false,
-              time: Date.now()
-            }]);
+            appendMessage(text, false);
           }).catch(() => {});
           return;
         }
@@ -732,6 +726,9 @@ function App() {
     const newRoomId = generate2CharRoomId();
     setRoomId(newRoomId);
     setIsInitiator(true);
+    setMessages([]);
+    setMessageInput('');
+    sendingTextRef.current = null;
     sessionStorage.setItem('p2p_beam_room', JSON.stringify({ roomId: newRoomId, isInitiator: true }));
     window.history.replaceState({ room: newRoomId }, '', `${window.location.pathname}?room=${newRoomId}`);
     initWebRTC(newRoomId, true);
@@ -743,6 +740,9 @@ function App() {
     const cleanRoom = codeToUse.trim().toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 2);
     if (cleanRoom.length !== 2) return;
     setIsInitiator(false);
+    setMessages([]);
+    setMessageInput('');
+    sendingTextRef.current = null;
     sessionStorage.setItem('p2p_beam_room', JSON.stringify({ roomId: cleanRoom, isInitiator: false }));
     window.history.replaceState({ room: cleanRoom }, '', `${window.location.pathname}?room=${cleanRoom}`);
     initWebRTC(cleanRoom, false);
@@ -779,6 +779,9 @@ function App() {
     setTransferMode('p2p');
     setSendProgress({ active: false, completed: false, fileName: '', fileSize: 0, bytesTransferred: 0, percent: 0, speed: 0, eta: 0 });
     setReceiveProgress({ active: false, completed: false, fileName: '', fileSize: 0, bytesTransferred: 0, percent: 0, speed: 0, eta: 0 });
+    setMessages([]);
+    setMessageInput('');
+    sendingTextRef.current = null;
   };
 
   const zipFilesAndSetState = async (fileEntries, defaultZipName) => {
@@ -885,11 +888,22 @@ function App() {
   const handleSendText = () => {
     const text = messageInput.trim();
     if (!text || !webrtc.current || connectionState !== 'connected') return;
+    // Guard BEFORE touching state: engine sends sequentially, a busy engine
+    // would silently drop the text after we already cleared the input.
     if (webrtc.current.isSending) return;
     const file = new File([new TextEncoder().encode(text)], `message-${Date.now()}.txt`, { type: 'text/plain' });
     sendingTextRef.current = text;
     setMessageInput('');
     webrtc.current.sendFile(file, 'text');
+  };
+
+  const appendMessage = (text, mine) => {
+    setMessages((prev) => [...prev, {
+      id: `m-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      text,
+      mine,
+      time: Date.now()
+    }].slice(-4));
   };
 
   // Announce the native file picker to the peer *before* it opens so the
