@@ -5,8 +5,8 @@ name: Deploy Media Service Dev (beam-media)
 #   1. systemd unit beam-media-dev.service running /opt/beam-media-dev/beam-media
 #      with Environment="MEDIA_DIR=/opt/beam-media-dev/media" "PORT=3005"
 #      and EnvironmentFile holding UPLOAD_PASSWORD (never commit the secret).
-#   2. Reverse proxy (Caddy) routing /upload*, /watch*, /media/*, /captions/*
-#      (paths preserved) to 127.0.0.1:3005 on the dev domain.
+#   2. Reverse proxy (Caddy) routing /upload*, /watch*, /media/*, /captions/*,
+#      /tracks*, /audio* (paths preserved) to 127.0.0.1:3005 on the dev domain.
 #   3. Reuse the existing SSH_PRIVATE_KEY / REMOTE_USER / REMOTE_HOST secrets.
 
 on:
