@@ -348,6 +348,11 @@ fn fmt_size(b: u64) -> String {
     }
 }
 
+// Displayed in the library header on hover. Deliberately SEPARATE from the
+// main BEAM app versioning (that client is v1.3.x; this service versions
+// on its own).
+const MEDIA_VERSION: &str = "v1.0.0";
+
 fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
     let mut rows = String::new();
     for (name, size) in files {
@@ -394,11 +399,15 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
 .pool{{font-size:.75rem;color:#71717a;margin:.2rem 0 .3rem}}
 .poolbarw{{height:4px;background:#27272a;border-radius:2px;overflow:hidden;margin-bottom:1rem}}
 .poolbar{{height:100%;background:#71717a}}
+.brand{{font-size:1.1rem;letter-spacing:.14em;margin:0 0 .2rem}}
+.brand #beamlogo{{font-weight:700;cursor:default}}
+.brand .media-sub{{font-size:.8rem;font-weight:400;letter-spacing:.1em;color:#71717a}}
+.brand .ver{{font-size:.8rem;font-weight:400;letter-spacing:.06em;color:#a1a1aa}}
 .qbtn{{background:transparent;color:#e4e4e7;border:1px solid #52525b;border-radius:6px;padding:.3rem .6rem;font-size:.75rem;font-family:inherit;cursor:pointer;min-height:44px;min-width:44px}}
 .del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem;min-height:44px;min-width:44px}}
 @media (max-width:480px){{body{{padding:1rem}}.dz{{padding:1.2rem .8rem}}.row{{padding:.6rem .7rem;gap:.6rem}}.fsize{{font-size:.68rem}}}}
 .uperr{{color:#f87171;font-size:.8rem;margin:0 0 .6rem}}</style>
-</head><body><main><h1>MEDIA</h1>
+</head><body><main><h1 class="brand"><span id="beamlogo">BEAM</span> <span class="media-sub">MEDIA</span></h1>
 <p class="pool">{pool_txt}</p><div class="poolbarw"><div class="poolbar" style="width:{pool_pct}%"></div></div>
 <div class="dz" id="dz"><p class="dz-t">Drop files here or tap to browse</p><p class="dz-s">Resumable chunks · any type · .vtt attaches to a video · pool max 50 GB</p><input type="file" id="dzfile" multiple hidden></div>
 <div id="queue"></div>
@@ -485,6 +494,17 @@ else txt+=' …';
 if(old)old.textContent=txt;
 else{{var s=document.createElement('span');s.className='xcode';s.textContent=txt;a.parentNode.insertBefore(s,a.nextSibling);}}}}}}).catch(function(){{}});}}
 setInterval(pollXcode,4000);pollXcode();
+// Brand hover: hold BEAM 2s → sub flips to the service version for 4s,
+// then flips back to MEDIA. Re-arms on mouse leave. Tap = instant reveal
+// (touch has no hover).
+var logo=document.getElementById('beamlogo');
+if(logo){{var hoverT=null,revertT=null,armed=true;
+function brandSub(){{return document.querySelector('.brand .media-sub,.brand .ver');}}
+function showVer(){{var s=brandSub();if(!s)return;s.textContent='{mver}';s.className='ver';clearTimeout(revertT);revertT=setTimeout(hideVer,4000);}}
+function hideVer(){{var s=brandSub();if(!s)return;s.textContent='MEDIA';s.className='media-sub';}}
+logo.addEventListener('mouseenter',function(){{if(!armed)return;clearTimeout(hoverT);hoverT=setTimeout(function(){{if(armed){{armed=false;showVer();}}}},2000);}});
+logo.addEventListener('mouseleave',function(){{clearTimeout(hoverT);armed=true;}});
+logo.addEventListener('click',function(){{clearTimeout(hoverT);armed=false;showVer();}});}}
 function addRow(name,size){{var empty=document.querySelector('main .empty');if(empty)empty.remove();
 var low=name.toLowerCase();
 function ext(){{var i=low.lastIndexOf('.');return i>=0?low.slice(i+1):'';}}
@@ -505,7 +525,8 @@ var qv2=document.getElementById('queue');qv2.parentNode.insertBefore(div,qv2.nex
 </script></body></html>"#,
         rows = rows,
         pool_txt = format!("{} / 50 GB used", fmt_size(pool_used)),
-        pool_pct = (pool_used * 100 / MAX_POOL_BYTES).min(100)
+        pool_pct = (pool_used * 100 / MAX_POOL_BYTES).min(100),
+        mver = MEDIA_VERSION
     ))
 }
 
