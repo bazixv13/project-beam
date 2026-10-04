@@ -117,24 +117,10 @@ body {
   color: var(--text-main);
   cursor: default;
   user-select: none;
-  /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ version */
+  /* content-sized: the badge hugs the logo and only slides while the
+     version is revealed on hover */
   display: inline-grid;
   position: relative;
-}
-
-/* invisible width-holder — set to whichever string is wider; the home
-   variant reserves room for the icon button too */
-.brand-title::after {
-  content: 'v1.3.25';
-  visibility: hidden;
-  height: 0;
-  overflow: hidden;
-  grid-area: 1 / 1;
-  white-space: nowrap;
-}
-.brand-title.with-home::after {
-  content: 'v1.3.25  ⌂';
 }
 
 .brand-title__beam,
@@ -198,12 +184,6 @@ body {
   display: inline-flex;
   align-items: center;
   margin-left: 0;
-}
-
-/* Home-on reserves icon width invisibly, pushing the badge out — tuck the
-   badge back so it hugs the logo like the media header does */
-.brand-title.with-home + .mode-badge-wrapper {
-  margin-left: -0.7rem;
 }
 
 .mode-badge-wrapper .mode-indicator {

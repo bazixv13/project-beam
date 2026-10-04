@@ -494,7 +494,7 @@ for(var i=0;i<rows.length;i++){{var a=rows[i].querySelector('.watch');if(!a)cont
 var mark=null;for(var k=0;k<list.length;k++)if(list[k].name===a.textContent){{mark=list[k];break;}}
 var old=rows[i].querySelector('.xcode');
 if(!mark){{if(old)old.remove();continue;}}
-var txt=mark.kind==='audio'?'sound':'subs';
+var txt=mark.kind==='audio'?'sound':(mark.kind==='mp4'?'mp4':'subs');
 if(mark.progress!=null)txt+=' '+mark.progress+'%';
 else txt+=' …';
 if(old)old.textContent=txt;
@@ -620,6 +620,14 @@ async fn maybe_transcode_finished(state: &AppState, video: &str) {
         Ok(t) => t,
         Err(_) => return,
     };
+    // MKV finishes get the full phone-smooth remux (video copy + AAC
+    // default) instead of a lone audio sidecar — it fixes sound AND
+    // phone stutter in one job.
+    if is_mkv(video) {
+        let def_idx = audios.iter().find(|a| a.is_default).map(|a| a.index);
+        kick_remux(state, video, &path, def_idx);
+        return;
+    }
     let Some(def) = audios.iter().find(|a| a.is_default) else {
         return;
     };
@@ -873,7 +881,13 @@ async fn upload_transcodes(State(state): State<AppState>, headers: HeaderMap) ->
             if !cache.starts_with(&format!("{}.", stem)) || !is_cache_file(cache) {
                 continue;
             }
-            let kind = if cache.ends_with(".m4a") { "audio" } else { "sub" };
+            let kind = if cache.ends_with(".m4a") {
+                "audio"
+            } else if cache.ends_with(".play.mp4") {
+                "mp4"
+            } else {
+                "sub"
+            };
             out.push(serde_json::json!({
                 "name": name,
                 "kind": kind,
@@ -976,7 +990,8 @@ async fn upload_delete(
                     if let Some(s) = entry.file_name().to_str() {
                         let stem = media_stem(&name);
                         if (s.starts_with(&format!("{}.sub", stem))
-                            || s.starts_with(&format!("{}.au", stem)))
+                            || s.starts_with(&format!("{}.au", stem))
+                            || s.starts_with(&format!("{}.play", stem)))
                             && is_cache_file(s)
                         {
                             let _ = tokio::fs::remove_file(entry.path()).await;
@@ -1018,10 +1033,9 @@ fn player_page(title: &str, media_url: &str, tracks: &[(String, String)]) -> Htm
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 html{{background:#000;user-select:none;-webkit-user-select:none}}
-body{{background:#000;color:#f4f4f5;font-family:monospace;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}}
-.top{{display:flex;align-items:center;gap:1rem;padding:.9rem 1.2rem}}
-.top a{{color:#a1a1aa;text-decoration:none;font-size:.85rem}}
-.top h1{{font-size:.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+body{{background:#000;color:#f4f4f5;font-family:monospace;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;overflow-x:hidden;max-width:100vw}}
+.top{{display:flex;align-items:center;gap:1rem;padding:.9rem 1.2rem;max-width:100vw;box-sizing:border-box}}
+.top h1{{font-size:.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}}
 .stage{{position:relative;flex:1;display:flex;background:#000;min-height:0;align-items:center;justify-content:center}}
 .stage:not(.show-controls):not(.paused),.stage:not(.show-controls):not(.paused) *{{cursor:none}}
 video{{width:100%;height:100%;max-height:calc(100vh - 160px);max-height:calc(100dvh - 160px);background:#000;object-fit:contain}}
@@ -1043,7 +1057,7 @@ video{{width:100%;height:100%;max-height:calc(100vh - 160px);max-height:calc(100
 .stage.buffering .center-play{{display:none}}
 @keyframes spin{{to{{transform:translate(-50%,-50%) rotate(360deg)}}}}
 .cc-wrap{{position:relative}}
-.cc-menu{{position:absolute;right:0;bottom:56px;z-index:8;min-width:200px;background:rgba(10,10,12,.97);border:1px solid #52525b;border-radius:10px;padding:.4rem;display:none;flex-direction:column;gap:.15rem}}
+.cc-menu{{position:absolute;right:0;bottom:56px;z-index:8;min-width:200px;max-width:86vw;background:rgba(10,10,12,.97);border:1px solid #52525b;border-radius:10px;padding:.4rem;display:none;flex-direction:column;gap:.15rem;max-height:min(60dvh,420px);overflow-y:auto}}
 .cc-menu.open{{display:flex}}
 .cc-menu button{{background:transparent;border:none;color:#e4e4e7;border-radius:6px;min-height:44px;font:inherit;font-size:.85rem;cursor:pointer;text-align:left;padding:.5rem .8rem;display:block;width:100%}}
 .cc-menu button.sel{{background:#27272a;color:#fff}}
@@ -1058,6 +1072,9 @@ video{{width:100%;height:100%;max-height:calc(100vh - 160px);max-height:calc(100
 .cc-menu .szrow{{display:flex;gap:.3rem;align-items:center}}
 .cc-menu .szrow button{{flex:1;text-align:center}}
 .cc-menu .szval{{color:#f4f4f5;font-size:.8rem;min-width:44px;text-align:center}}
+/* Narrow phones: the controls row (4 buttons + timestamp + gaps) is wider
+   than 360px viewports — compact it instead of scrolling sideways. */
+@media (max-width:480px){{.controls{{padding:.5rem .6rem calc(.6rem + env(safe-area-inset-bottom))}}.row{{gap:.4rem}}.ctl{{min-width:44px;min-height:44px;font-size:.9rem;padding:0 .5rem}}.time{{font-size:.7rem}}.top{{padding:.7rem .8rem;gap:.6rem}}}}
 ::cue{{background:rgba(0,0,0,.75);color:#fff;font-family:monospace}}
 </style><style id="cue-style"></style></head><body>
 <div class="top"><a href="/upload">&#8592; Library</a><h1>{title}</h1></div>
@@ -1131,7 +1148,7 @@ seek.addEventListener('pointerup',function(){{seeking=false;}});
 seek.addEventListener('input',function(){{if(v.duration){{v.currentTime=seek.value/1000*v.duration;syncAuToVideo();}}}});
 setInterval(function(){{if(v.duration&&!v.paused)try{{localStorage.setItem(VKEY,String(v.currentTime));}}catch(_e){{}}}},5000);
 window.addEventListener('pagehide',function(){{try{{if(v.duration&&v.currentTime>1)localStorage.setItem(VKEY,String(v.currentTime));}}catch(_e){{}}}});
-function maybeResume(){{var t=0;try{{t=parseFloat(localStorage.getItem(VKEY))||'0';}}catch(_e){{}}if(t>10&&v.duration&&t<v.duration-10){{rtext.textContent='Resume from '+fmt(t)+'?';veil.classList.add('open');rno.textContent='Start over';delete rno.dataset.armed;ryes.onclick=function(){{v.currentTime=t;veil.classList.remove('open');v.play();}};rno.onclick=function(){{if(!rno.dataset.armed){{rno.dataset.armed='1';rno.textContent='Are you sure?';setTimeout(function(){{delete rno.dataset.armed;rno.textContent='Start over';}},3000);return;}}try{{localStorage.removeItem(VKEY);}}catch(_e){{}}veil.classList.remove('open');v.currentTime=0;v.play();}};}}}}
+function maybeResume(){{if(pendingSwapT!==null){{var pt=pendingSwapT;pendingSwapT=null;veil.classList.remove('open');if(v.duration)v.currentTime=Math.min(pt,Math.max(0,v.duration-2));if(swapWasPlaying){{var p=v.play();if(p&&p.catch)p.catch(function(){{}});}}return;}}var t=0;try{{t=parseFloat(localStorage.getItem(VKEY))||'0';}}catch(_e){{}}if(t>10&&v.duration&&t<v.duration-10){{rtext.textContent='Resume from '+fmt(t)+'?';veil.classList.add('open');rno.textContent='Start over';delete rno.dataset.armed;ryes.onclick=function(){{v.currentTime=t;veil.classList.remove('open');v.play();}};rno.onclick=function(){{if(!rno.dataset.armed){{rno.dataset.armed='1';rno.textContent='Are you sure?';setTimeout(function(){{delete rno.dataset.armed;rno.textContent='Start over';}},3000);return;}}try{{localStorage.removeItem(VKEY);}}catch(_e){{}}veil.classList.remove('open');v.currentTime=0;v.play();}};}}}}
 function trackList(){{return v.textTracks;}}
 function fmtUp(l){{return /^[a-z]{{2,3}}$/i.test(l)?'['+l.toUpperCase()+']':l;}}
 // Unified subtitle state: 'off' | 'u'<uploaded idx> | 'e'<embedded stream idx>
@@ -1145,17 +1162,22 @@ function currentSel(){{var ts=trackList();for(var i=0;i<ts.length;i++)if(ts[i].m
 function showEmbedded(eidx){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===eidx)em=EMB[i];if(!em||!em.cached)return false;xt.src=em.url;xt.dataset.idx=String(eidx);var done=false;function ready(){{if(done)return;done=true;applySel('e'+eidx);}}xt.addEventListener('load',function onl(){{xt.removeEventListener('load',onl);ready();}});setTimeout(ready,1200);return true;}}
 function vname(){{return decodeURIComponent('{media}').split('/').pop();}}
 function prepareTrack(kind,idx){{var fd=new FormData();fd.append('v',vname());fd.append('kind',kind);fd.append('index',String(idx));fetch('/tracks/prepare',{{method:'POST',body:fd,credentials:'same-origin'}}).then(function(){{}}).catch(function(){{}});}}
-function refreshTracks(){{fetch('/tracks?v='+encodeURIComponent(vname()),{{credentials:'same-origin'}}).then(function(r){{return r.ok?r.json():null;}}).then(function(j){{if(!j)return;if(j.subs){{EMB=j.subs;if(ccmenu.classList.contains('open'))buildMenu(currentSel());if(wantSub!==null){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===wantSub)em=EMB[i];if(em&&em.cached){{wantSub=null;showEmbedded(em.index);}}else if(em&&!em.failed){{prepareTrack('subs',em.index);if(em.progress!=null)showToast('Transcoding:'+xpct(em));}}else if(em&&em.failed){{showToast('Subtitles failed — open CC to retry');}}}}}}if(j.audio){{AUD=j.audio;if(aumenu.classList.contains('open'))buildAuMenu(curAuIdx());if(wantAu!==null){{var at=null;for(var k=0;k<AUD.length;k++)if(AUD[k].index===wantAu)at=AUD[k];if(at&&at.cached){{wantAu=null;applyAu(at.index);showToast('Audio ready');}}else if(at&&!at.failed){{prepareTrack('audio',at.index);if(at.progress!=null)showToast('Transcoding:'+xpct(at));}}else if(at&&at.failed){{showToast('Transcoding failed — open AU to retry');}}}}if(!auRestored){{auRestored=true;if(!restoreAu())autoDefaultAudio();}}}}}}).catch(function(){{}});}}
-setInterval(function(){{if(wantSub!==null||wantAu!==null)refreshTracks();}},2000);
+function refreshTracks(){{fetch('/tracks?v='+encodeURIComponent(vname()),{{credentials:'same-origin'}}).then(function(r){{return r.ok?r.json():null;}}).then(function(j){{if(!j)return;if(j.subs){{EMB=j.subs;if(ccmenu.classList.contains('open'))buildMenu(currentSel());if(wantSub!==null){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===wantSub)em=EMB[i];if(em&&em.cached){{wantSub=null;showEmbedded(em.index);}}else if(em&&!em.failed){{prepareTrack('subs',em.index);if(em.progress!=null)showToast('Transcoding:'+xpct(em));}}else if(em&&em.failed){{showToast('Subtitles failed — open CC to retry');}}}}}}if(j.audio){{AUD=j.audio;if(aumenu.classList.contains('open'))buildAuMenu(curAuIdx());if(wantAu!==null){{var at=null;for(var k=0;k<AUD.length;k++)if(AUD[k].index===wantAu)at=AUD[k];if(at&&at.cached){{wantAu=null;applyAu(at.index);showToast('Audio ready');}}else if(at&&!at.failed){{prepareTrack('audio',at.index);if(at.progress!=null)showToast('Transcoding:'+xpct(at));}}else if(at&&at.failed){{showToast('Transcoding failed — open AU to retry');}}}}if(!auRestored){{auRestored=true;if(!restoreAu())autoDefaultAudio();remuxAuto();}}if(j.remux){{REM=j.remux;if(REM.cached&&!vSwapped)swapToRemux();else if(REM.needed&&!REM.cached&&!REM.failed&&wantRemux)prepareTrack('remux',0);else if(REM.failed&&wantRemux){{wantRemux=false;showToast('Smooth version failed — playing original');}}}}}}}}).catch(function(){{}});}}
+setInterval(function(){{if(wantSub!==null||wantAu!==null||wantRemux)refreshTracks();}},2000);
 // Audio track chooser: the container default plays natively; anything else
 // (or an undecodable default like EAC3) plays via an extracted AAC sidecar
 // through the hidden <audio> element, frame-synced to the muted video.
 var AUD=[],wantAu=null,auRestored=false;
+// Phone-smooth MP4 rendition: swapped in when cached (strictly better —
+// faststart + native decode), auto-built on phones / no-MKV browsers.
+var REM=null,vSwapped=false,wantRemux=false,pendingSwapT=null,swapWasPlaying=false;
+function swapToRemux(){{if(!REM||!REM.cached||vSwapped)return;vSwapped=true;wantRemux=false;pendingSwapT=v.currentTime||0;swapWasPlaying=!v.paused;v.src=REM.url;v.load();showToast('Switched to smoother version');}}
+function remuxAuto(){{if(!REM||!REM.needed||REM.cached||REM.failed||vSwapped||wantRemux)return;var coarse=false;try{{coarse=window.matchMedia&&matchMedia('(pointer:coarse)').matches;}}catch(_e){{}}var mt='';try{{mt=v.canPlayType('video/x-matroska');}}catch(_e){{}}if(coarse||mt===''){{wantRemux=true;prepareTrack('remux',0);showToast('Preparing smoother version…');}}}}
 var AUKEY='beam-au-'+decodeURIComponent('{media}').split('/').pop();
 function auTrack(idx){{for(var i=0;i<AUD.length;i++)if(AUD[i].index===idx)return AUD[i];return null;}}
 function curAuIdx(){{if(auActive()){{var m=/track=(\d+)/.exec(aud.getAttribute('src')||'');return m?parseInt(m[1],10):-2;}}for(var i=0;i<AUD.length;i++)if(AUD[i].default)return AUD[i].index;return -2;}}
 function applyAu(idx){{var t=auTrack(idx);
-if(idx===-1||(t&&t.default&&t.native)){{v.muted=false;aud.pause();aud.removeAttribute('src');aud.load();au.classList.remove('on');try{{localStorage.setItem(AUKEY,'native');}}catch(_e){{}}buildAuMenu(curAuIdx());return;}}
+if(idx===-1||(t&&t.default&&(t.native||vSwapped))){{v.muted=false;aud.pause();aud.removeAttribute('src');aud.load();au.classList.remove('on');try{{localStorage.setItem(AUKEY,'native');}}catch(_e){{}}buildAuMenu(curAuIdx());return;}}
 if(!t||!t.cached){{if(t){{wantAu=t.index;prepareTrack('audio',t.index);showToast('Extracting audio, sound starts automatically');}}buildAuMenu(curAuIdx());return;}}
 wantAu=null;v.muted=true;aud.src=t.url;aud.playbackRate=v.playbackRate;syncAuToVideo();au.classList.add('on');try{{localStorage.setItem(AUKEY,String(idx));}}catch(_e){{}}if(!v.paused){{var p=aud.play();if(p&&p.catch)p.catch(function(){{}});}}buildAuMenu(curAuIdx());}}
 function restoreAu(){{var s=null;try{{s=localStorage.getItem(AUKEY);}}catch(_e){{}}if(s===null||s==='')return false;if(s==='native'){{applyAu(-1);return true;}}var idx=parseInt(s,10);if(isNaN(idx))return false;var t=auTrack(idx);if(!t)return false;if(t.default&&t.native)applyAu(-1);else if(t.cached)applyAu(idx);else{{wantAu=idx;prepareTrack('audio',idx);showToast('Extracting audio, sound starts automatically');}}return true;}}
@@ -1701,13 +1723,29 @@ fn audio_cache_name(video: &str, idx: usize) -> String {
     format!("{}.au{}.m4a", media_stem(video), idx)
 }
 
+/// Phone-smooth MP4 rendition of an MKV: video stream-COPIED (no re-encode),
+//  default audio transcoded to AAC, faststart for instant playback. Mobile
+// browsers hardware-decode MP4 but choke on MKV containers + dual-element
+// audio sync; this is what actually fixes phone stutter.
+fn remux_cache_name(video: &str) -> String {
+    format!("{}.play.mp4", media_stem(video))
+}
+
+fn is_mkv(video: &str) -> bool {
+    video.to_ascii_lowercase().ends_with(".mkv")
+}
+
 fn sub_cache_name(video: &str, idx: usize) -> String {
     format!("{}.sub{}.vtt", media_stem(video), idx)
 }
 
 fn is_cache_file(name: &str) -> bool {
-    // Matches extraction-cache subtitles <stem>.sub<idx>.vtt
-    // and extraction-cache audio <stem>.au<idx>.m4a.
+    // Matches extraction-cache subtitles <stem>.sub<idx>.vtt,
+    // extraction-cache audio <stem>.au<idx>.m4a,
+    // and phone-smooth renditions <stem>.play.mp4.
+    if let Some(base) = name.strip_suffix(".play.mp4") {
+        return !base.is_empty() && !base.contains('/') && !base.contains('\\');
+    }
     if let Some(base) = name.strip_suffix(".vtt") {
         if let Some(seg) = base.rsplit('.').next() {
             return seg.starts_with("sub")
@@ -1781,7 +1819,24 @@ async fn tracks_info(
             "url": format!("/audio?v={}&track={}", url_encode(&video), t.index),
         }));
     }
-    axum::Json(serde_json::json!({ "subs": sj, "audio": aj })).into_response()
+    axum::Json(serde_json::json!({ "subs": sj, "audio": aj, "remux": remux_json(&state, &video).await })).into_response()
+}
+
+/// Phone-smooth rendition descriptor for MKV videos (null otherwise).
+async fn remux_json(state: &AppState, video: &str) -> serde_json::Value {
+    if !is_mkv(video) {
+        return serde_json::Value::Null;
+    }
+    let file = remux_cache_name(video);
+    let cached = tokio::fs::metadata(state.media_dir.join(&file)).await.is_ok();
+    serde_json::json!({
+        "needed": true,
+        "cached": cached,
+        "progress": extract_pct(state, &file),
+        "partial": extract_partial(state, &file).await,
+        "failed": state.failures.get(&file).map(|v| *v).unwrap_or(0),
+        "url": format!("/media/{}", url_encode(&file)),
+    })
 }
 
 #[derive(Deserialize)]
@@ -1821,6 +1876,17 @@ async fn tracks_prepare(
             Some(t) => audio_cache_name(&video, t.index),
             None => return StatusCode::BAD_REQUEST.into_response(),
         }
+    } else if form.kind.as_str() == "remux" {
+        // Phone-smooth rendition only makes sense for MKV containers.
+        if !is_mkv(&video) {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
+        let def_idx = audios.iter().find(|a| a.is_default).map(|a| a.index);
+        return match kick_remux(&state, &video, &path, def_idx) {
+            "ready" => (StatusCode::OK, "ready").into_response(),
+            "busy" => (StatusCode::ACCEPTED, "busy").into_response(),
+            _ => (StatusCode::ACCEPTED, "started").into_response(),
+        };
     } else {
         return StatusCode::BAD_REQUEST.into_response();
     };
@@ -1861,6 +1927,49 @@ async fn tracks_prepare(
     let st = state.clone();
     tokio::spawn(run_extract(path, args, muxer, tmp, dst, cache, st));
     (StatusCode::ACCEPTED, "started").into_response()
+}
+
+/// Start (or observe) the phone-smooth MP4 rendition of an MKV: video
+/// stream-copied, default audio to AAC, faststart. Returns "ready" when the
+/// file exists or a job is already running, "busy" on a duplicate race,
+/// "started" when a fresh ffmpeg was spawned.
+fn kick_remux(
+    state: &AppState,
+    video: &str,
+    path: &PathBuf,
+    default_audio_idx: Option<usize>,
+) -> &'static str {
+    let cache = remux_cache_name(video);
+    let dst = state.media_dir.join(&cache);
+    // Sync metadata check: the file either exists (ready) or it doesn't.
+    if std::fs::metadata(&dst).is_ok() || state.extracting.contains(&cache) {
+        return "ready";
+    }
+    if !state.extracting.insert(cache.clone()) {
+        return "busy";
+    }
+    state.failures.remove(&cache);
+    let tmp = state.media_dir.join(format!("{}.part", &cache));
+    let mut args = vec!["-map".to_string(), "0:v:0".to_string()];
+    if let Some(aidx) = default_audio_idx {
+        args.push("-map".to_string());
+        args.push(format!("0:{}", aidx));
+        args.extend(
+            ["-c:a", "aac", "-b:a", "160k"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
+    }
+    args.push("-dn".to_string());
+    args.push("-sn".to_string());
+    args.extend(
+        ["-c:v", "copy", "-movflags", "+faststart"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
+    let st = state.clone();
+    tokio::spawn(run_extract(path.clone(), args, "mp4", tmp, dst, cache, st));
+    "started"
 }
 
 #[derive(Deserialize)]

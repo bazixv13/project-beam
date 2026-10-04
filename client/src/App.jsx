@@ -269,7 +269,7 @@ function BrandTitle({ onGoHome, homeLabel, logoRefresh = true, logoHome = true }
 
   return (
     <span
-      className={`brand-title${hovered ? ' brand-title--version' : ''}${logoHome ? ' with-home' : ''}`}
+      className={`brand-title${hovered ? ' brand-title--version' : ''}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onClick={logoRefresh ? (e) => { e.stopPropagation(); onGoHome?.(); } : undefined}
