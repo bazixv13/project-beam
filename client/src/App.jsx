@@ -147,6 +147,42 @@ function formatEta(seconds) {
   return `${mins}m ${remSec}s`;
 }
 
+// Split message text into plain spans + clickable links. Trailing punctuation
+// stays outside the link; www. links get https:// prepended. Links open in a
+// new tab (room survives) and stopPropagation so bubble tap-to-copy doesn't
+// fire when tapping a link.
+const URL_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/g;
+function renderMsgText(text) {
+  const parts = String(text).split(URL_RE);
+  return parts.map((part, i) => {
+    if (!part) return null;
+    const m = part.match(/^(https?:\/\/[^\s]+|www\.[^\s]+)$/);
+    if (!m) return <span key={i}>{part}</span>;
+    let url = m[1];
+    let trail = '';
+    const tm = url.match(/[.,;:!?)]+$/);
+    if (tm) {
+      trail = tm[0];
+      url = url.slice(0, -trail.length);
+    }
+    if (!url) return <span key={i}>{part}</span>;
+    const href = url.startsWith('http') ? url : `https://${url}`;
+    return (
+      <span key={i}>
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {url}
+        </a>
+        {trail}
+      </span>
+    );
+  });
+}
+
 function getInitialLang() {
   try {
     const saved = localStorage.getItem('lang');
@@ -233,7 +269,7 @@ function BrandTitle({ onGoHome, homeLabel, logoRefresh = true, logoHome = true }
 
   return (
     <span
-      className={`brand-title${hovered ? ' brand-title--version' : ''}`}
+      className={`brand-title${hovered ? ' brand-title--version' : ''}${logoHome ? ' with-home' : ''}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onClick={logoRefresh ? (e) => { e.stopPropagation(); onGoHome?.(); } : undefined}
@@ -1579,7 +1615,7 @@ function App() {
                     tabIndex={0}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleCopyMessage(m); }}
                   >
-                    <span className="msg-text">{m.text}</span>
+                    <span className="msg-text">{renderMsgText(m.text)}</span>
                     <span className="msg-time">{formatMsgTime(m.time)}</span>
                   </div>
                 ))}

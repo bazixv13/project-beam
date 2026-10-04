@@ -117,19 +117,23 @@ body {
   cursor: default;
   user-select: none;
   /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.24 */
+     never changes width when swapping BEAM ↔ version */
   display: inline-grid;
   position: relative;
 }
 
-/* invisible width-holder — set to whichever string is wider */
+/* invisible width-holder — set to whichever string is wider; the home
+   variant reserves room for the icon button too */
 .brand-title::after {
-  content: 'v1.3.25  ⌂';
+  content: 'v1.3.25';
   visibility: hidden;
   height: 0;
   overflow: hidden;
   grid-area: 1 / 1;
   white-space: nowrap;
+}
+.brand-title.with-home::after {
+  content: 'v1.3.25  ⌂';
 }
 
 .brand-title__beam,
@@ -1143,6 +1147,13 @@ body {
   white-space: pre-wrap;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.msg-text a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .msg-time {
