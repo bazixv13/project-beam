@@ -44,7 +44,7 @@ const MAX_POOL_BYTES: u64 = 50 * 1024 * 1024 * 1024;
 const MAX_SUBTITLE_BYTES: usize = 50 * 1024 * 1024;
 
 /// Video extensions playable in the browser player.
-const VIDEO_EXTS: &[&str] = &["mov", "mp4", "mkv"];
+const VIDEO_EXTS: &[&str] = &["mov", "mp4", "m4v", "mkv", "webm"];
 /// Everything storable. Served inline only for VIDEO_EXTS, as a forced
 /// download otherwise (no inline HTML/JS/SVG rendering, no XSS surface).
 const ALLOWED_EXTS: &[&str] = &[
@@ -259,14 +259,43 @@ fn media_stem(name: &str) -> &str {
     }
 }
 
+fn media_ext(name: &str) -> String {
+    match name.rfind('.') {
+        Some(i) => name[i + 1..].to_ascii_lowercase(),
+        None => String::new(),
+    }
+}
+
+/// Browsers render these natively (no custom player needed): images, PDFs
+/// and audio get the browser's own viewer/player; VIDEO_EXTS additionally
+/// get the watch page. Everything else stays a forced download — notably
+/// never inline HTML/SVG (XSS surface).
+fn inline_native(name: &str) -> bool {
+    matches!(
+        media_ext(name).as_str(),
+        "mov" | "mp4" | "m4v" | "mkv" | "webm"
+            | "jpg" | "jpeg" | "png" | "gif" | "webp" | "heic" | "heif"
+            | "pdf"
+            | "mp3" | "wav" | "flac" | "ogg" | "opus"
+    )
+}
+
 fn media_content_type(name: &str) -> &'static str {
-    let lower = name.to_ascii_lowercase();
-    if lower.ends_with(".mov") {
-        "video/quicktime"
-    } else if lower.ends_with(".mkv") {
-        "video/x-matroska"
-    } else {
-        "video/mp4"
+    match media_ext(name).as_str() {
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "webm" => "video/webm",
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "heic" | "heif" => "image/heic",
+        "pdf" => "application/pdf",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        "ogg" | "opus" => "audio/ogg",
+        _ => "video/mp4",
     }
 }
 
@@ -323,17 +352,20 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
         let enc = url_encode(name);
         let esc = html_escape(name);
         let fsize = fmt_size(*size);
-        if is_video(name) {
-            rows.push_str(&format!(
-                r#"<div class="row"><a class="watch" href="/watch?v={0}">{1}</a><span class="fsize">{2}</span><form method="post" action="/upload/delete"><input type="hidden" name="name" value="{1}"><button class="del" type="button" onclick="return armDel(this)">Delete</button></form></div>"#,
-                enc, esc, fsize
-            ));
+        // Player videos get the watch page; other browser-native types
+        // (images, PDFs, audio) open directly in the browser's own viewer;
+        // the rest download.
+        let href = if is_video(name) {
+            format!("/watch?v={}", enc)
+        } else if inline_native(name) {
+            format!("/media/{}", enc)
         } else {
-            rows.push_str(&format!(
-                r#"<div class="row"><a class="watch" href="/media/{0}?dl=1">{1}</a><span class="fsize">{2}</span><form method="post" action="/upload/delete"><input type="hidden" name="name" value="{1}"><button class="del" type="button" onclick="return armDel(this)">Delete</button></form></div>"#,
-                enc, esc, fsize
-            ));
-        }
+            format!("/media/{}?dl=1", enc)
+        };
+        rows.push_str(&format!(
+            r#"<div class="row"><a class="watch" href="{0}">{1}</a><span class="fsize">{2}</span><form method="post" action="/upload/delete"><input type="hidden" name="name" value="{1}"><button class="del" type="button" onclick="return armDel(this)">Delete</button></form></div>"#,
+            href, esc, fsize
+        ));
     }
     if rows.is_empty() {
         rows.push_str(r#"<p class="empty">No videos yet.</p>"#);
@@ -389,7 +421,7 @@ var it={{f:f,name:f.name,size:f.size,received:0,token:null,cap:/\.vtt$/i.test(f.
 items.push(it);render(it);
 if(it.cap){{/* waits for target pick */}}else resumeCheck(it);}}
 pump();}}
-function render(it){{var el=document.getElementById(it.el);if(!el){{el=document.createElement('div');el.className='qitem';el.id='q'+(it.el=items.indexOf(it)+'_'+Date.now());qv.appendChild(el);}}
+function render(it){{var el=document.getElementById(it.el);if(!el){{el=document.createElement('div');el.className='qitem';it.el='q'+items.indexOf(it)+'_'+Date.now();el.id=it.el;qv.appendChild(el);}}
 var p=it.size?Math.round(it.received/it.size*100):0;
 var h='<div class="qname">'+it.name.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</div>';
 if(it.cap){{h+='<div class="qmeta">subtitle → <select class="qsel" data-q="t">'+targetOpts(it.target)+'</select></div>';}}
@@ -401,8 +433,8 @@ var sel=el.querySelector('select');if(sel)sel.onchange=function(){{it.target=sel
 function targetOpts(cur){{var o='<option value="">pick a video…</option>';var vs=vids();for(var i=0;i<vs.length;i++){{var v=vs[i].replace(/&/g,'&amp;').replace(/</g,'&lt;');o+='<option value="'+vs[i].replace(/"/g,'&quot;')+'"'+(vs[i]===cur?' selected':'')+'>'+v+'</option>';}}return o;}}
 function metaText(it,p){{if(it.state==='error')return 'Error: '+it.err;if(it.state==='done')return 'Done ✓';if(it.cap&&!it.target)return mb(it.size)+' · pick a video above to attach';var s=p+'% · '+mb(it.received)+' / '+mb(it.size);if(it.state==='active'&&it._spd)s+=' · '+mb(it._spd)+'/s '+eta(it._eta);if(it.state==='paused')s+=' · paused';return s;}}
 function btns(it){{if(it.state==='done')return '';if(it.state==='active')return '<button class="qbtn" data-a="pause">Pause</button><button class="qbtn" data-a="cancel">Cancel</button>';if(it.state==='paused')return '<button class="qbtn" data-a="resume">Resume</button><button class="qbtn" data-a="cancel">Cancel</button>';if(it.state==='error')return '<button class="qbtn" data-a="retry">Retry</button><button class="qbtn" data-a="cancel">Cancel</button>';return '<button class="qbtn" data-a="cancel">Cancel</button>';}}
-function btnAct(it,a){{return function(){{if(a==='pause'&&it===active){{it.state='paused';render(it);active=null;pump();}}else if(a==='resume'){{it.state='queued';it.err='';render(it);pump();}}else if(a==='retry'){{it.state='queued';it.err='';render(it);pump();}}else if(a==='cancel'){{cancelItem(it);}};}};}}
-function cancelItem(it){{var t=it.token;it.state='cancelled';var el=document.getElementById(it.el);if(el)el.remove();items.splice(items.indexOf(it),1);try{{localStorage.removeItem(ukey(it));}}catch(_e){{}}if(t)fetch('/upload/cancel',{{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:'token='+encodeURIComponent(t),credentials:'same-origin'}}).catch(function(){{}});if(active===it){{active=null;pump();}}}}
+function btnAct(it,a){{return function(){{if(a==='pause'&&it===active){{it.state='paused';if(it.abort)it.abort.abort();render(it);active=null;pump();}}else if(a==='resume'){{it.state='queued';it.err='';render(it);pump();}}else if(a==='retry'){{it.state='queued';it.err='';render(it);pump();}}else if(a==='cancel'){{cancelItem(it);}};}};}}
+function cancelItem(it){{var t=it.token;it.state='cancelled';if(it.abort)it.abort.abort();var el=document.getElementById(it.el);if(el)el.remove();items.splice(items.indexOf(it),1);try{{localStorage.removeItem(ukey(it));}}catch(_e){{}}if(t)fetch('/upload/cancel',{{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:'token='+encodeURIComponent(t),credentials:'same-origin'}}).catch(function(){{}});if(active===it){{active=null;pump();}}}}
 function resumeCheck(it){{var raw=null;try{{raw=localStorage.getItem(ukey(it));}}catch(_e){{}}if(!raw)return;var tk=null;try{{tk=JSON.parse(raw).token;}}catch(_e){{}}if(!tk)return;it.token=tk;
 fetch('/upload/status?name='+encodeURIComponent(it.name)+'&size='+it.size,{{credentials:'same-origin'}}).then(function(r){{if(!r.ok)throw 0;return r.json();}}).then(function(j){{it.token=j.token;it.received=j.received||0;try{{localStorage.setItem(ukey(it),JSON.stringify({{token:it.token}}));}}catch(_e){{}}render(it);pump();}}).catch(function(){{it.token=null;}});}}
 function pump(){{if(active)return;for(var i=0;i<items.length;i++){{var it=items[i];if(it.state==='queued'&&(!it.cap||it.target)){{active=it;run(it);return;}}}}}}
@@ -417,7 +449,8 @@ try{{localStorage.setItem(ukey(it),JSON.stringify({{token:it.token}}));}}catch(_
 var lastT=Date.now(),lastB=it.received;it._spd=0;it._eta=0;
 while(it.received<it.size){{if(it.state!=='active')return;
 var end=Math.min(it.received+CHUNK,it.size);
-var r=await fetch('/upload/chunk?token='+encodeURIComponent(it.token)+'&offset='+it.received,{{method:'POST',body:it.f.slice(it.received,end),credentials:'same-origin'}});
+it.abort=new AbortController();
+var r=await fetch('/upload/chunk?token='+encodeURIComponent(it.token)+'&offset='+it.received,{{method:'POST',body:it.f.slice(it.received,end),signal:it.abort.signal,credentials:'same-origin'}});
 if(r.status===401){{location.reload();return;}}
 if(r.status===409){{var cj=await r.json();it.received=cj.received;continue;}}
 if(r.status===404){{it.token=null;try{{localStorage.removeItem(ukey(it));}}catch(_e){{}}throw new Error('session lost, retry');}}
@@ -433,7 +466,7 @@ it.state='done';it.received=it.size;
 if(!it.cap)addRow(fj.name,it.size);
 render(it);
 setTimeout(function(){{var el=document.getElementById(it.el);if(el)el.remove();var ix=items.indexOf(it);if(ix>=0)items.splice(ix,1);}},6000);
-}}catch(e){{it.state='error';it.err=String((e&&e.message)||e).slice(0,120);render(it);}}
+}}catch(e){{if(it.state==='cancelled'){{/* row gone, nothing to show */}}else if(e&&e.name==='AbortError'&&it.state==='paused'){{render(it);}}else{{it.state='error';it.err=String((e&&e.message)||e).slice(0,120);render(it);}}}}
 active=null;pump();}}
 // Subtle transcode hint on library rows: polls in-flight extractions and
 // tags matching rows with a small gray percent. Nothing flashes, no layout
@@ -450,10 +483,15 @@ else txt+=' …';
 if(old)old.textContent=txt;
 else{{var s=document.createElement('span');s.className='xcode';s.textContent=txt;a.parentNode.insertBefore(s,a.nextSibling);}}}}}}).catch(function(){{}});}}
 setInterval(pollXcode,4000);pollXcode();
-function addRow(name,size){{var empty=document.querySelector('main .empty');if(empty)empty.remove();var isVid=/\.(mov|mp4|mkv)$/i.test(name);
+function addRow(name,size){{var empty=document.querySelector('main .empty');if(empty)empty.remove();
+var low=name.toLowerCase();
+function ext(){{var i=low.lastIndexOf('.');return i>=0?low.slice(i+1):'';}}
+var e=ext();
+var isVid=['mov','mp4','m4v','mkv','webm'].indexOf(e)>=0;
+var isNative=isVid||['jpg','jpeg','png','gif','webp','heic','heif','pdf','mp3','wav','flac','ogg','opus'].indexOf(e)>=0;
 var div=document.createElement('div');div.className='row';
 var a=document.createElement('a');a.className='watch';a.textContent=name;
-a.href=isVid?'/watch?v='+encodeURIComponent(name):'/media/'+encodeURIComponent(name)+'?dl=1';
+a.href=isVid?'/watch?v='+encodeURIComponent(name):(isNative?'/media/'+encodeURIComponent(name):'/media/'+encodeURIComponent(name)+'?dl=1');
 var sz=document.createElement('span');sz.className='fsize';sz.textContent=(size>=1073741824?(size/1073741824).toFixed(2)+' GB':(size/1048576).toFixed(size<10485760?1:0)+' MB');
 var f=document.createElement('form');f.method='post';f.action='/upload/delete';
 var h=document.createElement('input');h.type='hidden';h.name='name';h.value=name;
@@ -510,7 +548,7 @@ async fn upload_login(
 // A dropped connection only loses the in-flight chunk: the client re-asks
 // /upload/status?name=&size= (or reuses its token) and resumes at `received`.
 // Chunk tmp files are hidden `.upload-<token>.part` names, published by
-// atomic rename on finish. Sessions idle >24h are swept with their tmps.
+// atomic rename on finish. Sessions idle >30min are swept with their tmps.
 
 /// Max bytes accepted in one chunk POST (client sends 8 MiB).
 const MAX_CHUNK_BYTES: usize = 64 * 1024 * 1024;
@@ -816,12 +854,12 @@ async fn upload_transcodes(State(state): State<AppState>, headers: HeaderMap) ->
     }
     axum::Json(serde_json::json!(out)).into_response()
 }
-
-/// Drop sessions idle >24h with their tmps; also purges stray tmps.
-async fn sweep_uploads(state: &AppState) {    let stale: Vec<(String, PathBuf)> = state
+/// Drop sessions idle >30min with their tmps; also purges stray tmps.
+async fn sweep_uploads(state: &AppState) {
+    let stale: Vec<(String, PathBuf)> = state
         .uploads
         .iter()
-        .filter(|e| e.value().updated.elapsed() > std::time::Duration::from_secs(86400))
+        .filter(|e| e.value().updated.elapsed() > std::time::Duration::from_secs(1800))
         .map(|e| (e.key().clone(), e.value().tmp.clone()))
         .collect();
     for (token, tmp) in stale {
@@ -1187,8 +1225,9 @@ struct MediaQuery {
 
 /// Stream a file with HTTP Range support so browsers play without
 /// downloading: 206 Partial Content for `bytes=start-end`, 200 otherwise.
-/// Reads in 64KB chunks — never buffers the file in RAM. Videos play inline;
-/// everything else (and ?dl=1) downloads as an attachment.
+/// Reads in 64KB chunks — never buffers the file in RAM. Browser-native
+/// types (player video, images, PDFs, audio) render inline; everything
+/// else (and ?dl=1) downloads as an attachment.
 async fn media_file(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1205,8 +1244,7 @@ async fn media_file(
     let Ok(meta) = tokio::fs::metadata(&path).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let inline_video = is_video(&safe) && q.dl.is_none();
-    if inline_video {
+    if inline_native(&safe) && q.dl.is_none() {
         return stream_range_response(
             path,
             meta.len(),
@@ -1296,6 +1334,7 @@ async fn stream_range_response(
             StatusCode::OK
         })
         .header(header::CONTENT_TYPE, content_type)
+        .header("X-Content-Type-Options", "nosniff")
         .header(header::ACCEPT_RANGES, "bytes")
         .header(header::CONTENT_RANGE, content_range)
         .header(header::CONTENT_LENGTH, length);
@@ -1803,13 +1842,13 @@ async fn main() {
         uploads: Arc::new(DashMap::new()),
     };
 
-    // Hourly sweep of uploads idle >24h.
+    // Sweep uploads idle >30min, every 10 minutes.
     {
         let sweep_state = state.clone();
         tokio::spawn(async move {
             use tokio::time::{sleep, Duration};
             loop {
-                sleep(Duration::from_secs(3600)).await;
+                sleep(Duration::from_secs(600)).await;
                 sweep_uploads(&sweep_state).await;
             }
         });
