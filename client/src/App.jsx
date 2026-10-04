@@ -1385,6 +1385,7 @@ function App() {
                       <span className="settings-knob"></span>
                     </label>
                   </div>
+                  <a className="settings-media-link" href="/upload" target="_blank" rel="noreferrer">MEDIA →</a>
                 </div>
               </div>
             )}

@@ -1022,6 +1022,24 @@ body {
   gap: 1.5rem;
 }
 
+/* hidden-ish footer hop to the media library — opens in a new tab so the
+   room survives */
+.settings-media-link {
+  display: block;
+  margin: 0.2rem auto 0;
+  padding: 0.4rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  text-align: center;
+  text-decoration: none;
+  opacity: 0.55;
+}
+.settings-media-link:hover {
+  opacity: 1;
+  color: var(--text-main);
+}
+
 .settings-row {
   display: flex;
   flex-direction: column;
