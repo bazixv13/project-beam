@@ -629,6 +629,8 @@ video{{width:100%;height:100%;max-height:calc(100vh - 160px);max-height:calc(100
 .cc-menu button.sel{{background:#27272a;color:#fff}}
 .cc-menu button.up{{color:#a1a1aa;border-top:1px solid #27272a;margin-top:.2rem}}
 .resume-veil{{position:absolute;inset:0;z-index:9;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center}}
+.toast{{position:absolute;left:50%;bottom:110px;transform:translateX(-50%);z-index:10;background:rgba(20,20,22,.95);border:1px solid #52525b;border-radius:10px;padding:.6rem 1rem;font-size:.8rem;color:#f4f4f5;display:none;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}}
+.toast.show{{display:block}}
 .resume-veil.open{{display:flex}}
 .resume-card{{border:1px solid #52525b;border-radius:12px;padding:1.4rem;display:flex;flex-direction:column;gap:.9rem;max-width:min(360px,90vw);background:#0a0a0c}}
 .resume-card p{{font-size:.9rem}}
@@ -648,6 +650,7 @@ video{{width:100%;height:100%;max-height:calc(100vh - 160px);max-height:calc(100
 <p id="resume-text">Resume?</p>
 <div class="row"><button class="ctl" id="resume-no">Start over</button><button class="ctl" id="resume-yes">Resume</button></div>
 </div></div>
+<div class="toast" id="toast"></div>
 <div class="controls" id="controls">
 <input class="seek" id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
 <div class="row">
@@ -672,6 +675,7 @@ ccfile=document.getElementById('ccfile'),fs=document.getElementById('fs'),
 big=document.getElementById('bigplay'),veil=document.getElementById('veil'),
 rtext=document.getElementById('resume-text'),ryes=document.getElementById('resume-yes'),
 rno=document.getElementById('resume-no'),spd=document.getElementById('spd'),
+toast=document.getElementById('toast'),
 hideT=null,seeking=false;
 var VKEY='beam-pos-'+decodeURIComponent('{media}').split('/').pop();
 var CKEY='beam-cc-'+decodeURIComponent('{media}').split('/').pop();
@@ -685,6 +689,8 @@ v.addEventListener('playing',function(){{setBuffering(false);}});
 v.addEventListener('canplay',function(){{setBuffering(false);}});
 v.addEventListener('seeking',function(){{setBuffering(true);}});
 v.addEventListener('seeked',function(){{setBuffering(false);}});
+var toastT=null;
+function showToast(txt,ms){{toast.textContent=txt;toast.classList.add('show');clearTimeout(toastT);toastT=setTimeout(function(){{toast.classList.remove('show');}},ms||4000);}}
 function poke(){{stage.classList.add('show-controls');clearTimeout(hideT);if(!v.paused)hideT=setTimeout(function(){{stage.classList.remove('show-controls');ccmenu.classList.remove('open');aumenu.classList.remove('open');}},2800);}}
 function auActive(){{return aud.hasAttribute('src')&&aud.getAttribute('src')!=='';}}
 function syncAuToVideo(){{if(!auActive())return;try{{if(aud.readyState>0&&Math.abs(v.currentTime-aud.currentTime)>0.05)aud.currentTime=v.currentTime;}}catch(_e){{}}aud.playbackRate=v.playbackRate;}}
@@ -717,7 +723,7 @@ function currentSel(){{var ts=trackList();for(var i=0;i<ts.length;i++)if(ts[i].m
 function showEmbedded(eidx){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===eidx)em=EMB[i];if(!em||!em.cached)return false;xt.src=em.url;xt.dataset.idx=String(eidx);var done=false;function ready(){{if(done)return;done=true;applySel('e'+eidx);}}xt.addEventListener('load',function onl(){{xt.removeEventListener('load',onl);ready();}});setTimeout(ready,1200);return true;}}
 function vname(){{return decodeURIComponent('{media}').split('/').pop();}}
 function prepareTrack(kind,idx){{var fd=new FormData();fd.append('v',vname());fd.append('kind',kind);fd.append('index',String(idx));fetch('/tracks/prepare',{{method:'POST',body:fd,credentials:'same-origin'}}).then(function(){{}}).catch(function(){{}});}}
-function refreshTracks(){{fetch('/tracks?v='+encodeURIComponent(vname()),{{credentials:'same-origin'}}).then(function(r){{return r.ok?r.json():null;}}).then(function(j){{if(!j)return;if(j.subs){{EMB=j.subs;if(ccmenu.classList.contains('open'))buildMenu(currentSel());if(wantSub!==null){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===wantSub)em=EMB[i];if(em&&em.cached){{wantSub=null;showEmbedded(em.index);}}}}}}if(j.audio){{AUD=j.audio;if(aumenu.classList.contains('open'))buildAuMenu(curAuIdx());if(wantAu!==null){{var at=null;for(var k=0;k<AUD.length;k++)if(AUD[k].index===wantAu)at=AUD[k];if(at&&at.cached){{wantAu=null;applyAu(at.index);}}}}if(!auRestored){{auRestored=true;restoreAu();}}}}}}).catch(function(){{}});}}
+function refreshTracks(){{fetch('/tracks?v='+encodeURIComponent(vname()),{{credentials:'same-origin'}}).then(function(r){{return r.ok?r.json():null;}}).then(function(j){{if(!j)return;if(j.subs){{EMB=j.subs;if(ccmenu.classList.contains('open'))buildMenu(currentSel());if(wantSub!==null){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===wantSub)em=EMB[i];if(em&&em.cached){{wantSub=null;showEmbedded(em.index);}}}}}}if(j.audio){{AUD=j.audio;if(aumenu.classList.contains('open'))buildAuMenu(curAuIdx());if(wantAu!==null){{var at=null;for(var k=0;k<AUD.length;k++)if(AUD[k].index===wantAu)at=AUD[k];if(at&&at.cached){{wantAu=null;applyAu(at.index);showToast('Audio ready');}}}}if(!auRestored){{auRestored=true;if(!restoreAu())autoDefaultAudio();}}}}}}).catch(function(){{}});}}
 setInterval(function(){{if(wantSub!==null||wantAu!==null)refreshTracks();}},4000);
 // Audio track chooser: the container default plays natively; anything else
 // (or an undecodable default like EAC3) plays via an extracted AAC sidecar
@@ -728,9 +734,10 @@ function auTrack(idx){{for(var i=0;i<AUD.length;i++)if(AUD[i].index===idx)return
 function curAuIdx(){{if(auActive()){{var m=/track=(\d+)/.exec(aud.getAttribute('src')||'');return m?parseInt(m[1],10):-2;}}for(var i=0;i<AUD.length;i++)if(AUD[i].default)return AUD[i].index;return -2;}}
 function applyAu(idx){{var t=auTrack(idx);
 if(idx===-1||(t&&t.default&&t.native)){{v.muted=false;aud.pause();aud.removeAttribute('src');aud.load();au.classList.remove('on');try{{localStorage.setItem(AUKEY,'native');}}catch(_e){{}}buildAuMenu(curAuIdx());return;}}
-if(!t||!t.cached){{if(t){{wantAu=t.index;prepareTrack('audio',t.index);}}buildAuMenu(curAuIdx());return;}}
+if(!t||!t.cached){{if(t){{wantAu=t.index;prepareTrack('audio',t.index);showToast('Extracting audio, sound starts automatically');}}buildAuMenu(curAuIdx());return;}}
 wantAu=null;v.muted=true;aud.src=t.url;aud.playbackRate=v.playbackRate;syncAuToVideo();au.classList.add('on');try{{localStorage.setItem(AUKEY,String(idx));}}catch(_e){{}}if(!v.paused){{var p=aud.play();if(p&&p.catch)p.catch(function(){{}});}}buildAuMenu(curAuIdx());}}
-function restoreAu(){{var s=null;try{{s=localStorage.getItem(AUKEY);}}catch(_e){{}}if(s===null||s==='')return;if(s==='native'){{applyAu(-1);return;}}var idx=parseInt(s,10);if(isNaN(idx))return;var t=auTrack(idx);if(!t)return;if(t.default&&t.native)applyAu(-1);else if(t.cached)applyAu(idx);else{{wantAu=idx;prepareTrack('audio',idx);}}}}
+function restoreAu(){{var s=null;try{{s=localStorage.getItem(AUKEY);}}catch(_e){{}}if(s===null||s==='')return false;if(s==='native'){{applyAu(-1);return true;}}var idx=parseInt(s,10);if(isNaN(idx))return false;var t=auTrack(idx);if(!t)return false;if(t.default&&t.native)applyAu(-1);else if(t.cached)applyAu(idx);else{{wantAu=idx;prepareTrack('audio',idx);showToast('Extracting audio, sound starts automatically');}}return true;}}
+function autoDefaultAudio(){{var d=null;for(var i=0;i<AUD.length;i++)if(AUD[i].default)d=AUD[i];if(!d||d.native)return;if(d.cached){{applyAu(d.index);}}else{{wantAu=d.index;prepareTrack('audio',d.index);showToast('No playable sound in file, extracting audio…');}}}}
 function buildAuMenu(sel){{aumenu.innerHTML='';function add(txt,val){{var b=document.createElement('button');b.textContent=txt;if(val===sel)b.classList.add('sel');b.onclick=function(ev){{ev.stopPropagation();applyAu(val);aumenu.classList.remove('open');}};aumenu.appendChild(b);}}for(var i=0;i<AUD.length;i++){{var t=AUD[i];var tag=t.label+(t.default?' (default)':'')+((!t.native&&!t.cached)||(t.native&&!t.default&&!t.cached)?' …':'');add(tag,t.index);}}if(!AUD.length)add('No audio tracks',-2);}}
 au.addEventListener('click',function(e){{e.stopPropagation();buildAuMenu(curAuIdx());aumenu.classList.toggle('open');poke();}});
 function applyCC(idx){{applySel(idx<0?'off':'u'+idx);}}
