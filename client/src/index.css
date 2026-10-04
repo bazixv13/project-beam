@@ -1048,14 +1048,6 @@ body {
 .settings-media-hop svg {
   flex-shrink: 0;
 }
-.settings-media-go {
-  margin-left: auto;
-  transform: translateX(-3px);
-  transition: transform 0.2s ease;
-}
-.settings-media-hop:hover .settings-media-go {
-  transform: translateX(0);
-}
 
 .settings-row {
   display: flex;

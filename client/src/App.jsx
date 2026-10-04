@@ -1424,7 +1424,6 @@ function App() {
                   <a className="settings-media-hop" href="/upload" target="_blank" rel="noreferrer">
                     <Clapperboard size={14} />
                     <span>Media library</span>
-                    <span className="settings-media-go" aria-hidden="true">→</span>
                   </a>
                 </div>
               </div>
