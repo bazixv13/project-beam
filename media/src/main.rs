@@ -75,6 +75,8 @@ struct AppState {
     totals: Arc<DashMap<String, u64>>,
     /// In-flight chunked uploads: token -> session.
     uploads: Arc<DashMap<String, UploadSession>>,
+    /// Consecutive extraction failures per cache name (stops silent loops).
+    failures: Arc<DashMap<String, u32>>,
 }
 
 /// Max % of one CPU core a live box transcoding may burn (duty-cycled
@@ -1102,8 +1104,8 @@ function currentSel(){{var ts=trackList();for(var i=0;i<ts.length;i++)if(ts[i].m
 function showEmbedded(eidx){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===eidx)em=EMB[i];if(!em||!em.cached)return false;xt.src=em.url;xt.dataset.idx=String(eidx);var done=false;function ready(){{if(done)return;done=true;applySel('e'+eidx);}}xt.addEventListener('load',function onl(){{xt.removeEventListener('load',onl);ready();}});setTimeout(ready,1200);return true;}}
 function vname(){{return decodeURIComponent('{media}').split('/').pop();}}
 function prepareTrack(kind,idx){{var fd=new FormData();fd.append('v',vname());fd.append('kind',kind);fd.append('index',String(idx));fetch('/tracks/prepare',{{method:'POST',body:fd,credentials:'same-origin'}}).then(function(){{}}).catch(function(){{}});}}
-function refreshTracks(){{fetch('/tracks?v='+encodeURIComponent(vname()),{{credentials:'same-origin'}}).then(function(r){{return r.ok?r.json():null;}}).then(function(j){{if(!j)return;if(j.subs){{EMB=j.subs;if(ccmenu.classList.contains('open'))buildMenu(currentSel());if(wantSub!==null){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===wantSub)em=EMB[i];if(em&&em.cached){{wantSub=null;showEmbedded(em.index);}}else if(em){{prepareTrack('subs',em.index);if(em.progress!=null)showToast('Transcoding: '+em.progress+'%');}}}}}}if(j.audio){{AUD=j.audio;if(aumenu.classList.contains('open'))buildAuMenu(curAuIdx());if(wantAu!==null){{var at=null;for(var k=0;k<AUD.length;k++)if(AUD[k].index===wantAu)at=AUD[k];if(at&&at.cached){{wantAu=null;applyAu(at.index);showToast('Audio ready');}}else if(at){{prepareTrack('audio',at.index);if(at.progress!=null)showToast('Transcoding: '+at.progress+'%');}}}}if(!auRestored){{auRestored=true;if(!restoreAu())autoDefaultAudio();}}}}}}).catch(function(){{}});}}
-setInterval(function(){{if(wantSub!==null||wantAu!==null)refreshTracks();}},4000);
+function refreshTracks(){{fetch('/tracks?v='+encodeURIComponent(vname()),{{credentials:'same-origin'}}).then(function(r){{return r.ok?r.json():null;}}).then(function(j){{if(!j)return;if(j.subs){{EMB=j.subs;if(ccmenu.classList.contains('open'))buildMenu(currentSel());if(wantSub!==null){{var em=null;for(var i=0;i<EMB.length;i++)if(EMB[i].index===wantSub)em=EMB[i];if(em&&em.cached){{wantSub=null;showEmbedded(em.index);}}else if(em&&!em.failed){{prepareTrack('subs',em.index);if(em.progress!=null)showToast('Transcoding: '+em.progress+'%');}}else if(em&&em.failed){{showToast('Subtitles failed — open CC to retry');}}}}}}if(j.audio){{AUD=j.audio;if(aumenu.classList.contains('open'))buildAuMenu(curAuIdx());if(wantAu!==null){{var at=null;for(var k=0;k<AUD.length;k++)if(AUD[k].index===wantAu)at=AUD[k];if(at&&at.cached){{wantAu=null;applyAu(at.index);showToast('Audio ready');}}else if(at&&!at.failed){{prepareTrack('audio',at.index);if(at.progress!=null)showToast('Transcoding: '+at.progress+'%');}}else if(at&&at.failed){{showToast('Transcoding failed — open AU to retry');}}}}if(!auRestored){{auRestored=true;if(!restoreAu())autoDefaultAudio();}}}}}}).catch(function(){{}});}}
+setInterval(function(){{if(wantSub!==null||wantAu!==null)refreshTracks();}},2000);
 // Audio track chooser: the container default plays natively; anything else
 // (or an undecodable default like EAC3) plays via an extracted AAC sidecar
 // through the hidden <audio> element, frame-synced to the muted video.
@@ -1117,12 +1119,12 @@ if(!t||!t.cached){{if(t){{wantAu=t.index;prepareTrack('audio',t.index);showToast
 wantAu=null;v.muted=true;aud.src=t.url;aud.playbackRate=v.playbackRate;syncAuToVideo();au.classList.add('on');try{{localStorage.setItem(AUKEY,String(idx));}}catch(_e){{}}if(!v.paused){{var p=aud.play();if(p&&p.catch)p.catch(function(){{}});}}buildAuMenu(curAuIdx());}}
 function restoreAu(){{var s=null;try{{s=localStorage.getItem(AUKEY);}}catch(_e){{}}if(s===null||s==='')return false;if(s==='native'){{applyAu(-1);return true;}}var idx=parseInt(s,10);if(isNaN(idx))return false;var t=auTrack(idx);if(!t)return false;if(t.default&&t.native)applyAu(-1);else if(t.cached)applyAu(idx);else{{wantAu=idx;prepareTrack('audio',idx);showToast('Extracting audio, sound starts automatically');}}return true;}}
 function autoDefaultAudio(){{var d=null;for(var i=0;i<AUD.length;i++)if(AUD[i].default)d=AUD[i];if(!d||d.native)return;if(d.cached){{applyAu(d.index);}}else{{wantAu=d.index;prepareTrack('audio',d.index);showToast('No playable sound in file, extracting audio…');}}}}
-function buildAuMenu(sel){{aumenu.innerHTML='';function add(txt,val){{var b=document.createElement('button');b.textContent=txt;if(val===sel)b.classList.add('sel');b.onclick=function(ev){{ev.stopPropagation();applyAu(val);aumenu.classList.remove('open');}};aumenu.appendChild(b);}}for(var i=0;i<AUD.length;i++){{var t=AUD[i];var tag=t.label+(t.default?' (default)':'')+((!t.native&&!t.cached)||(t.native&&!t.default&&!t.cached)?(t.progress!=null?' ('+t.progress+'%)':' …'):'');add(tag,t.index);}}if(!AUD.length)add('No audio tracks',-2);}}
+function buildAuMenu(sel){{aumenu.innerHTML='';function add(txt,val){{var b=document.createElement('button');b.textContent=txt;if(val===sel)b.classList.add('sel');b.onclick=function(ev){{ev.stopPropagation();applyAu(val);aumenu.classList.remove('open');}};aumenu.appendChild(b);}}for(var i=0;i<AUD.length;i++){{var t=AUD[i];var tag=t.label+(t.default?' (default)':'')+((t.failed&&!t.cached)?' (failed — retry)':((!t.native&&!t.cached)||(t.native&&!t.default&&!t.cached)?(t.progress!=null?' ('+t.progress+'%)':' …'):''));add(tag,t.index);}}if(!AUD.length)add('No audio tracks',-2);}}
 au.addEventListener('click',function(e){{e.stopPropagation();buildAuMenu(curAuIdx());aumenu.classList.toggle('open');poke();}});
 function applyCC(idx){{applySel(idx<0?'off':'u'+idx);}}
 function savedCC(){{var s=savedSel();return s[0]==='u'?parseInt(s.slice(1),10):-1;}}
 function restoreCC(){{var ts=trackList();var s=savedSel();if(s[0]==='u'){{var i=parseInt(s.slice(1),10);if(isNaN(i)||i<-1||i>=ts.length)i=ts.length?0:-1;applySel(i<0?'off':'u'+i);}}else if(s[0]==='e'){{var ei=parseInt(s.slice(1),10);var em=null;for(var j=0;j<EMB.length;j++)if(EMB[j].index===ei)em=EMB[j];if(em&&em.cached)showEmbedded(ei);else applySel('off');}}else applySel('off');}}
-function buildMenu(sel){{ccmenu.innerHTML='';function add(txt,val){{var b=document.createElement('button');b.textContent=txt;if(val===sel)b.classList.add('sel');b.onclick=function(ev){{ev.stopPropagation();if(val[0]==='e'){{var ei=parseInt(val.slice(1),10);if(!showEmbedded(ei)){{wantSub=ei;prepareTrack('subs',ei);buildMenu(sel);return;}}}}else applySel(val);ccmenu.classList.remove('open');}};ccmenu.appendChild(b);}}add('Off','off');for(var i=0;i<LABELS.length;i++)add(fmtUp(LABELS[i]),'u'+i);for(var k=0;k<EMB.length;k++)add(EMB[k].label+(EMB[k].cached?'':(EMB[k].progress!=null?' ('+EMB[k].progress+'%)':' …')),'e'+EMB[k].index);var sz=document.createElement('div');sz.className='szrow';var dm=document.createElement('button');dm.textContent='A-';dm.onclick=function(ev){{ev.stopPropagation();bumpCue(-2);}};var sv=document.createElement('span');sv.className='szval';sv.id='szval';sv.textContent=cueSize+'px';var up2=document.createElement('button');up2.textContent='A+';up2.onclick=function(ev){{ev.stopPropagation();bumpCue(2);}};sz.appendChild(dm);sz.appendChild(sv);sz.appendChild(up2);ccmenu.appendChild(sz);var up=document.createElement('button');up.textContent='+ Upload .vtt';up.classList.add('up');up.onclick=function(ev){{ev.stopPropagation();ccmenu.classList.remove('open');ccfile.click();}};ccmenu.appendChild(up);}}
+function buildMenu(sel){{ccmenu.innerHTML='';function add(txt,val){{var b=document.createElement('button');b.textContent=txt;if(val===sel)b.classList.add('sel');b.onclick=function(ev){{ev.stopPropagation();if(val[0]==='e'){{var ei=parseInt(val.slice(1),10);if(!showEmbedded(ei)){{wantSub=ei;prepareTrack('subs',ei);buildMenu(sel);return;}}}}else applySel(val);ccmenu.classList.remove('open');}};ccmenu.appendChild(b);}}add('Off','off');for(var i=0;i<LABELS.length;i++)add(fmtUp(LABELS[i]),'u'+i);for(var k=0;k<EMB.length;k++)add(EMB[k].label+(EMB[k].cached?'':(EMB[k].failed?' (failed — retry)':(EMB[k].progress!=null?' ('+EMB[k].progress+'%)':' …'))),'e'+EMB[k].index);var sz=document.createElement('div');sz.className='szrow';var dm=document.createElement('button');dm.textContent='A-';dm.onclick=function(ev){{ev.stopPropagation();bumpCue(-2);}};var sv=document.createElement('span');sv.className='szval';sv.id='szval';sv.textContent=cueSize+'px';var up2=document.createElement('button');up2.textContent='A+';up2.onclick=function(ev){{ev.stopPropagation();bumpCue(2);}};sz.appendChild(dm);sz.appendChild(sv);sz.appendChild(up2);ccmenu.appendChild(sz);var up=document.createElement('button');up.textContent='+ Upload .vtt';up.classList.add('up');up.onclick=function(ev){{ev.stopPropagation();ccmenu.classList.remove('open');ccfile.click();}};ccmenu.appendChild(up);}}
 var cueStyle=document.getElementById('cue-style'),cueSize=28;
 try{{var s=parseInt(localStorage.getItem('beam-cue-size'),10);if(s>=12&&s<=48)cueSize=s;}}catch(_e){{}}
 function applyCue(){{cueStyle.textContent='::cue{{font-size:'+cueSize+'px;color:#fff;background:rgba(0,0,0,.6);text-shadow:-1px 0 0 #000,1px 0 0 #000,0 -1px 0 #000,0 1px 0 #000, -1px -1px 0 #000,1px 1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000;}}';try{{localStorage.setItem('beam-cue-size',String(cueSize));}}catch(_e){{}}var sv=document.getElementById('szval');if(sv)sv.textContent=cueSize+'px';}}
@@ -1543,8 +1545,10 @@ async fn run_extract(
     done.store(true, Ordering::Relaxed);
     if ok {
         let _ = tokio::fs::rename(&tmp, &dst).await;
+        state.failures.remove(&cache);
     } else {
         let _ = tokio::fs::remove_file(&tmp).await;
+        *state.failures.entry(cache.clone()).or_insert(0) += 1;
     }
     state.progress.remove(&cache);
     state.totals.remove(&cache);
@@ -1677,6 +1681,7 @@ async fn tracks_info(
             "label": sub_label(&t.lang, t.forced, t.sdh),
             "cached": cached,
             "progress": extract_pct(&state, &file),
+            "failed": state.failures.get(&file).map(|v| *v).unwrap_or(0),
             "url": format!("/captions/{}", url_encode(&file)),
         }));
     }
@@ -1697,6 +1702,7 @@ async fn tracks_info(
             // never play (container default wins), so they need it too.
             "cached": acached,
             "progress": extract_pct(&state, &file),
+            "failed": state.failures.get(&file).map(|v| *v).unwrap_or(0),
             "url": format!("/audio?v={}&track={}", url_encode(&video), t.index),
         }));
     }
@@ -1753,6 +1759,8 @@ async fn tracks_prepare(
     if !state.extracting.insert(cache.clone()) {
         return (StatusCode::ACCEPTED, "busy").into_response();
     }
+    // Fresh attempt: old failure count must not haunt the retry.
+    state.failures.remove(&cache);
     // Extract to a temp name, publish atomically on success. A crash leaves
     // only a hidden .part file (never listed, never served, wiped on delete).
     let tmp = state.media_dir.join(format!("{}.part", &cache));
@@ -1840,6 +1848,7 @@ async fn main() {
         progress: Arc::new(DashMap::new()),
         totals: Arc::new(DashMap::new()),
         uploads: Arc::new(DashMap::new()),
+        failures: Arc::new(DashMap::new()),
     };
 
     // Sweep uploads idle >30min, every 10 minutes.
