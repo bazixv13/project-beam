@@ -74,7 +74,7 @@ jobs:
           npm run build
 
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: frontend-dist
           path: client/dist
@@ -104,7 +104,7 @@ jobs:
           cargo build --release
 
       - name: Upload backend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: backend-binary
           path: server/target/release/p2p-server
@@ -117,14 +117,14 @@ jobs:
     steps:
       - name: Download frontend artifact
         if: needs.build-frontend.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: frontend-dist
           path: frontend-dist
 
       - name: Download backend artifact
         if: needs.build-backend.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: backend-binary
           path: backend-binary

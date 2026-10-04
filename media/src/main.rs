@@ -566,6 +566,10 @@ async fn upload_delete(
                         {
                             let _ = tokio::fs::remove_file(entry.path()).await;
                         }
+                        // Orphaned temp files from killed extractions.
+                        if s.starts_with(stem) && s.ends_with(".part") {
+                            let _ = tokio::fs::remove_file(entry.path()).await;
+                        }
                     }
                 }
             }
@@ -749,8 +753,7 @@ try{{var s=parseInt(localStorage.getItem('beam-cue-size'),10);if(s>=12&&s<=48)cu
 function applyCue(){{cueStyle.textContent='::cue{{font-size:'+cueSize+'px;color:#fff;background:rgba(0,0,0,.6);text-shadow:-1px 0 0 #000,1px 0 0 #000,0 -1px 0 #000,0 1px 0 #000, -1px -1px 0 #000,1px 1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000;}}';try{{localStorage.setItem('beam-cue-size',String(cueSize));}}catch(_e){{}}var sv=document.getElementById('szval');if(sv)sv.textContent=cueSize+'px';}}
 function bumpCue(d){{cueSize=Math.min(48,Math.max(12,cueSize+d));applyCue();}}
 applyCue();
-cc.addEventListener('click',function(e){{e.stopPropagation();buildMenu(currentCC());ccmenu.classList.toggle('open');poke();}});
-function currentCC(){{var s=currentSel();return s[0]==='u'?parseInt(s.slice(1),10):-1;}}
+cc.addEventListener('click',function(e){{e.stopPropagation();buildMenu(currentSel());ccmenu.classList.toggle('open');poke();}});
 ccfile.addEventListener('change',function(){{var f=ccfile.files[0];if(!f)return;if(f.size>50*1024*1024){{ccfile.value='';return;}}var fd=new FormData();fd.append('captions',f,f.name);var vn=decodeURIComponent('{media}').split('/').pop();fd.append('for',vn);fetch('/upload/file',{{method:'POST',body:fd,credentials:'same-origin'}}).then(function(r){{if(r.ok)location.reload();}}).catch(function(){{}});ccfile.value='';}});
 fs.addEventListener('click',function(e){{e.stopPropagation();if(document.fullscreenElement)document.exitFullscreen();else if(stage.requestFullscreen)stage.requestFullscreen();else if(v.webkitEnterFullscreen)v.webkitEnterFullscreen();}});
 document.addEventListener('click',function(e){{if(!e.target.closest||!e.target.closest('.cc-wrap')){{ccmenu.classList.remove('open');aumenu.classList.remove('open');}}}});
@@ -770,6 +773,7 @@ document.onkeyup=function(e){{
 if(e.code==='Space'&&holdingSpace){{holdingSpace=false;var held=Date.now()-holdT0;v.playbackRate=restoreRate;if(auActive())aud.playbackRate=restoreRate;spd.textContent=rateLabel(restoreRate);if(held<300)toggle();}}
 }};
 stage.addEventListener('mousemove',poke);stage.addEventListener('touchstart',poke,{{passive:true}});
+document.addEventListener('visibilitychange',function(){{if(document.hidden&&!v.paused)pauseAll();}});
 buildMenu('off');refreshTracks();poke();
 }})();
 </script></body></html>"#,
@@ -1149,10 +1153,14 @@ async fn tracks_info(
     let mut sj = Vec::new();
     for t in &subs {
         let file = sub_cache_name(&video, t.index);
+        // Not cached while an extraction is still running (the file only
+        // appears via atomic rename on success, this is belt-and-braces).
+        let cached = !state.extracting.contains(&file)
+            && tokio::fs::metadata(state.media_dir.join(&file)).await.is_ok();
         sj.push(serde_json::json!({
             "index": t.index,
             "label": sub_label(&t.lang, t.forced, t.sdh),
-            "cached": tokio::fs::metadata(state.media_dir.join(&file)).await.is_ok(),
+            "cached": cached,
             "url": format!("/captions/{}", url_encode(&file)),
         }));
     }
@@ -1160,6 +1168,8 @@ async fn tracks_info(
     for t in &audios {
         let file = audio_cache_name(&video, t.index);
         let native = audio_native_playable(&t.codec);
+        let acached = !state.extracting.contains(&file)
+            && tokio::fs::metadata(state.media_dir.join(&file)).await.is_ok();
         aj.push(serde_json::json!({
             "index": t.index,
             "label": audio_label(t),
@@ -1169,7 +1179,7 @@ async fn tracks_info(
             "native": native,
             // Undecodable defaults still need extraction; native alternates
             // never play (container default wins), so they need it too.
-            "cached": tokio::fs::metadata(state.media_dir.join(&file)).await.is_ok(),
+            "cached": acached,
             "url": format!("/audio?v={}&track={}", url_encode(&video), t.index),
         }));
     }
@@ -1218,21 +1228,28 @@ async fn tracks_prepare(
     };
     let is_audio = form.kind.as_str() == "audio";
     let dst = state.media_dir.join(&cache);
-    if tokio::fs::metadata(&dst).await.is_ok() {
+    // Never serve a half-written extraction: not cached while busy, and a
+    // killed ffmpeg (e.g. service restart mid-extraction) leaves no moov.
+    if tokio::fs::metadata(&dst).await.is_ok() || state.extracting.contains(&cache) {
         return (StatusCode::OK, "ready").into_response();
     }
     if !state.extracting.insert(cache.clone()) {
         return (StatusCode::ACCEPTED, "busy").into_response();
     }
     let extracting = state.extracting.clone();
+    // Extract to a temp name, publish atomically on success. A crash leaves
+    // only a hidden .part file (never listed, never served, wiped on delete).
+    let tmp = state.media_dir.join(format!("{}.part", &cache));
     tokio::spawn(async move {
         let ok = if is_audio {
-            extract_audio_track(&path, form.index, &dst).await
+            extract_audio_track(&path, form.index, &tmp).await
         } else {
-            extract_sub_track(&path, form.index, &dst).await
+            extract_sub_track(&path, form.index, &tmp).await
         };
-        if !ok {
-            let _ = tokio::fs::remove_file(&dst).await;
+        if ok {
+            let _ = tokio::fs::rename(&tmp, &dst).await;
+        } else {
+            let _ = tokio::fs::remove_file(&tmp).await;
         }
         extracting.remove(&cache);
     });
@@ -1245,7 +1262,7 @@ async fn extract_audio_track(src: &PathBuf, index: usize, dst: &PathBuf) -> bool
         tokio::process::Command::new("ffmpeg")
             .args(["-y", "-v", "error", "-i"])
             .arg(src)
-            .args(["-map", &format!("0:{}", index), "-vn", "-c:a", "aac", "-b:a", "160k"])
+            .args(["-map", &format!("0:{}", index), "-vn", "-c:a", "aac", "-b:a", "160k", "-f", "mp4"])
             .arg(dst)
             .output(),
     )
@@ -1301,7 +1318,7 @@ async fn extract_sub_track(src: &PathBuf, index: usize, dst: &PathBuf) -> bool {
         tokio::process::Command::new("ffmpeg")
             .args(["-y", "-v", "error", "-i"])
             .arg(src)
-            .args(["-map", &format!("0:{}", index)])
+            .args(["-map", &format!("0:{}", index), "-f", "webvtt"])
             .arg(dst)
             .output(),
     )
