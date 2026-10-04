@@ -306,7 +306,7 @@ fn login_page() -> Html<String> {
         r#"<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Media Library</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
 <style>html{background:#000;user-select:none;-webkit-user-select:none}body{background:#000;color:#f4f4f5;font-family:monospace;display:flex;min-height:100vh;min-height:100dvh;align-items:center;justify-content:center;margin:0}form{border:1px solid #27272a;border-radius:8px;padding:2rem;display:flex;flex-direction:column;gap:1rem;width:min(360px,90vw)}input{background:#121214;border:1px solid #27272a;color:#f4f4f5;border-radius:8px;padding:.8rem;font:inherit}button{background:#f4f4f5;color:#000;border:none;border-radius:8px;padding:.8rem;font:inherit;font-weight:700;cursor:pointer}</style>
 </head><body><form method="post" action="/upload">
 <input type="password" name="password" placeholder="Password" autocomplete="off" autofocus>
@@ -355,6 +355,8 @@ fn fmt_size(b: u64) -> String {
 // automatically at compile time by build.rs, so every deploy reports the
 // exact commit it runs.
 const MEDIA_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH"));
+// Short display string (layout-stable); the full hash rides in the tooltip.
+const MEDIA_VERSION_SHORT: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
 fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
     let mut rows = String::new();
@@ -384,7 +386,7 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
         r#"<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Media Library</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
 <style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');html{{background:#000;user-select:none;-webkit-user-select:none}}body{{background:#000;color:#f4f4f5;font-family:monospace;margin:0;padding:1.5rem;min-height:100vh;min-height:100dvh;box-sizing:border-box}}main{{max-width:640px;margin:0 auto}}h1{{font-size:1.1rem}}form.up{{border:1px solid #27272a;border-radius:8px;padding:1.2rem;display:flex;flex-direction:column;gap:.8rem;margin-bottom:1.5rem}}label{{font-size:.8rem;color:#a1a1aa}}input[type=file]{{color:#a1a1aa}}button{{background:#f4f4f5;color:#000;border:none;border-radius:8px;padding:.8rem;font:inherit;font-weight:700;cursor:pointer}}.row{{display:flex;gap:.8rem;align-items:center;border:1px solid #27272a;border-radius:8px;padding:.7rem .9rem;margin-bottom:.6rem}}.watch{{color:#f4f4f5;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}.del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem}}
 .del.armed{{background:#f4f4f5;color:#000;border-color:#f4f4f5;font-weight:700}}.empty{{color:#71717a}}
 .dz{{border:2px dashed #52525b;border-radius:12px;padding:1.6rem 1.2rem;text-align:center;margin-bottom:1rem;cursor:pointer}}
@@ -405,17 +407,17 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
 .poolbar{{height:100%;background:#71717a}}
 .brand{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:1.15rem;font-weight:800;letter-spacing:.08em;margin:0 0 .2rem;user-select:none;-webkit-user-select:none}}
 .brand .swap{{display:inline-grid;position:relative;cursor:default}}
-.brand .swap::after{{content:'{mver}';visibility:hidden;height:0;overflow:hidden;grid-area:1 / 1;white-space:nowrap}}
+.brand .swap::after{{content:'{mvershort}';visibility:hidden;height:0;overflow:hidden;grid-area:1 / 1;white-space:nowrap}}
 .brand #beamlogo,.brand #beamver{{grid-area:1 / 1;white-space:nowrap;transition:opacity .35s ease}}
 .brand #beamver{{opacity:0;font-weight:800}}
 .brand .swap.show-ver #beamlogo{{opacity:0}}
 .brand .swap.show-ver #beamver{{opacity:1}}
-.brand .media-sub{{font-family:'Bebas Neue','Arial Narrow',sans-serif;font-size:1rem;font-weight:400;letter-spacing:.22em;color:#71717a}}
+.brand .media-sub{{font-family:'Bebas Neue','Arial Narrow',sans-serif;font-size:1rem;font-weight:400;letter-spacing:.1em;color:#71717a}}
 .qbtn{{background:transparent;color:#e4e4e7;border:1px solid #52525b;border-radius:6px;padding:.3rem .6rem;font-size:.75rem;font-family:inherit;cursor:pointer;min-height:44px;min-width:44px}}
 .del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem;min-height:44px;min-width:44px}}
 @media (max-width:480px){{body{{padding:1rem}}.dz{{padding:1.2rem .8rem}}.row{{padding:.6rem .7rem;gap:.6rem}}.fsize{{font-size:.68rem}}}}
 .uperr{{color:#f87171;font-size:.8rem;margin:0 0 .6rem}}</style>
-</head><body><main><h1 class="brand"><span class="swap" id="swap"><span id="beamlogo">BEAM</span><span id="beamver">{mver}</span></span> <span class="media-sub">MEDIA</span></h1>
+</head><body><main><h1 class="brand"><span class="swap" id="swap" title="{mver}"><span id="beamlogo">BEAM</span><span id="beamver">{mvershort}</span></span> <span class="media-sub">MEDIA</span></h1>
 <p class="pool">{pool_txt}</p><div class="poolbarw"><div class="poolbar" style="width:{pool_pct}%"></div></div>
 <div class="dz" id="dz"><p class="dz-t">Drop files here or tap to browse</p><p class="dz-s">Resumable chunks · any type · .vtt attaches to a video · pool max 50 GB</p><input type="file" id="dzfile" multiple hidden></div>
 <div id="queue"></div>
@@ -534,7 +536,8 @@ var qv2=document.getElementById('queue');qv2.parentNode.insertBefore(div,qv2.nex
         rows = rows,
         pool_txt = format!("{} / 50 GB used", fmt_size(pool_used)),
         pool_pct = (pool_used * 100 / MAX_POOL_BYTES).min(100),
-        mver = MEDIA_VERSION
+        mver = MEDIA_VERSION,
+        mvershort = MEDIA_VERSION_SHORT
     ))
 }
 
@@ -1016,7 +1019,7 @@ fn player_page(title: &str, media_url: &str, tracks: &[(String, String)]) -> Htm
         r#"<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/svg+xml" href="/media/favicon.svg">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 html{{background:#000;user-select:none;-webkit-user-select:none}}
@@ -1958,7 +1961,7 @@ async fn main() {
         .route("/tracks", get(tracks_info))
         .route("/tracks/prepare", post(tracks_prepare))
         .route("/audio", get(serve_audio))
-        .route("/favicon.svg", get(favicon))
+        .route("/media/favicon.svg", get(favicon))
         .with_state(state);
 
     // Crash leftovers from chunked uploads never survive a restart: their
