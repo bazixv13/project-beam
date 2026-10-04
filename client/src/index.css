@@ -107,6 +107,7 @@ body {
 .brand {
   display: flex;
   align-items: center;
+  gap: 0.4rem;
 }
 
 .brand-title {
@@ -116,20 +117,10 @@ body {
   color: var(--text-main);
   cursor: default;
   user-select: none;
-  /* grid trick: ::after holds the wider string invisibly so the wrapper
-     never changes width when swapping BEAM ↔ v1.3.23 */
+  /* content-sized: the badge hugs the logo and only slides while the
+     version is revealed on hover */
   display: inline-grid;
   position: relative;
-}
-
-/* invisible width-holder — set to whichever string is wider */
-.brand-title::after {
-  content: 'v1.3.23  ⌂';
-  visibility: hidden;
-  height: 0;
-  overflow: hidden;
-  grid-area: 1 / 1;
-  white-space: nowrap;
 }
 
 .brand-title__beam,
@@ -192,7 +183,7 @@ body {
   position: relative;
   display: inline-flex;
   align-items: center;
-  margin-left: 0.5rem;
+  margin-left: 0;
 }
 
 .mode-badge-wrapper .mode-indicator {
@@ -424,6 +415,12 @@ body {
 
 .btn-solid:active {
   transform: scale(0.99);
+}
+
+.btn-solid:disabled {
+  opacity: 0.4;
+  cursor: default;
+  transform: none;
 }
 
 .btn-solid.btn-compact {
@@ -1016,6 +1013,29 @@ body {
   gap: 1.5rem;
 }
 
+/* footer hop to the media library — quiet by default, deliberate on hover */
+.settings-media-hop {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.4rem;
+  padding: 0.65rem 0.2rem 0.1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-decoration: none;
+  opacity: 0.75;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+.settings-media-hop:hover {
+  opacity: 1;
+  color: var(--text-main);
+}
+.settings-media-hop svg {
+  flex-shrink: 0;
+}
+
 .settings-row {
   display: flex;
   flex-direction: column;
@@ -1084,6 +1104,9 @@ body {
 .msg-bubble {
   max-width: 85%;
   align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
   padding: 0.6rem 0.85rem;
   border-radius: 10px;
   border: 1px solid var(--border);
@@ -1092,9 +1115,36 @@ body {
   font-size: 0.875rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.msg-bubble.copied {
+  border-color: var(--text-main);
+}
+
+.msg-text {
   white-space: pre-wrap;
   user-select: text;
   -webkit-user-select: text;
+}
+
+.msg-text a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.msg-time {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-faint);
+  align-self: flex-end;
+}
+
+.msg-bubble.mine .msg-time {
+  color: var(--btn-fg);
+  opacity: 0.7;
 }
 
 .msg-bubble.mine {

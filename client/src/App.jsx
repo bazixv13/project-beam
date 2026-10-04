@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check, Settings, Home } from 'lucide-react';
+import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check, Settings, Home, Clapperboard } from 'lucide-react';
 import { WebRTCConnection } from './webrtc';
 import './index.css';
 
@@ -49,6 +49,7 @@ const dict = {
     shareMissed: 'Shared file didn’t arrive — please share again',
     messagePlaceholder: 'Type a message…',
     sendMessage: 'Send',
+    roomFull: 'Room is occupied — try another code',
     settings: 'Settings',
     transferMode: 'Transfer Mode',
     modeP2P: 'Direct P2P (WebRTC)',
@@ -101,6 +102,7 @@ const dict = {
     shareMissed: 'Plik nie dotarł — udostępnij ponownie',
     messagePlaceholder: 'Napisz wiadomość…',
     sendMessage: 'Wyślij',
+    roomFull: 'Pokój jest zajęty — spróbuj innego kodu',
     settings: 'Ustawienia',
     transferMode: 'Tryb transferu',
     modeP2P: 'Bezpośrednie P2P (WebRTC)',
@@ -143,6 +145,42 @@ function formatEta(seconds) {
   const mins = Math.floor(s / 60);
   const remSec = s % 60;
   return `${mins}m ${remSec}s`;
+}
+
+// Split message text into plain spans + clickable links. Trailing punctuation
+// stays outside the link; www. links get https:// prepended. Links open in a
+// new tab (room survives) and stopPropagation so bubble tap-to-copy doesn't
+// fire when tapping a link.
+const URL_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/g;
+function renderMsgText(text) {
+  const parts = String(text).split(URL_RE);
+  return parts.map((part, i) => {
+    if (!part) return null;
+    const m = part.match(/^(https?:\/\/[^\s]+|www\.[^\s]+)$/);
+    if (!m) return <span key={i}>{part}</span>;
+    let url = m[1];
+    let trail = '';
+    const tm = url.match(/[.,;:!?)]+$/);
+    if (tm) {
+      trail = tm[0];
+      url = url.slice(0, -trail.length);
+    }
+    if (!url) return <span key={i}>{part}</span>;
+    const href = url.startsWith('http') ? url : `https://${url}`;
+    return (
+      <span key={i}>
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {url}
+        </a>
+        {trail}
+      </span>
+    );
+  });
 }
 
 function getInitialLang() {
@@ -191,26 +229,43 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.23';
+const APP_VERSION = 'v1.3.25';
 
 function BrandTitle({ onGoHome, homeLabel, logoRefresh = true, logoHome = true }) {
   const [hovered, setHovered] = useState(false);
   const revertTimer = useRef(null);
+  const holdTimer = useRef(null);
+
+  const clearTimers = () => {
+    if (revertTimer.current) clearTimeout(revertTimer.current);
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+  };
 
   const handleMouseEnter = () => {
-    setHovered(true);
-    if (revertTimer.current) clearTimeout(revertTimer.current);
-    revertTimer.current = setTimeout(() => {
-      setHovered(false);
-    }, 6000);
+    clearTimers();
+    if (!logoHome) {
+      // Home button off: hold-to-reveal — version appears after a 2s hold,
+      // then hides 4s later (same rhythm as the media library brand).
+      holdTimer.current = setTimeout(() => {
+        setHovered(true);
+        revertTimer.current = setTimeout(() => {
+          setHovered(false);
+        }, 4000);
+      }, 2000);
+    } else {
+      setHovered(true);
+      revertTimer.current = setTimeout(() => {
+        setHovered(false);
+      }, 6000);
+    }
   };
 
   const handleMouseLeave = () => {
-    if (revertTimer.current) clearTimeout(revertTimer.current);
+    clearTimers();
     setHovered(false);
   };
 
-  useEffect(() => () => { if (revertTimer.current) clearTimeout(revertTimer.current); }, []);
+  useEffect(() => () => { clearTimers(); }, []);
 
   return (
     <span
@@ -428,7 +483,9 @@ function App() {
   });
   const [messages, setMessages] = useState([]);
   const [messageInput, setMessageInput] = useState('');
+  const [copiedMsgId, setCopiedMsgId] = useState(null);
   const [shareNotice, setShareNotice] = useState('');
+  const [engineBusy, setEngineBusy] = useState(false);
   const sendingTextRef = useRef(null);
   const shareNoticeTimer = useRef(null);
 
@@ -620,8 +677,10 @@ function App() {
             setMessageInput(sendingTextRef.current);
             sendingTextRef.current = null;
           }
+          setEngineBusy(false);
           return;
         }
+        if (!progress.active) setEngineBusy(false);
         if (progress.active) {
           setConnectionState('connected');
         }
@@ -692,6 +751,10 @@ function App() {
       },
       onOffline: (offline) => {
         setIsOffline(offline);
+      },
+      onRoomFull: () => {
+        handleLeaveRoom();
+        flashShareNotice(t.roomFull);
       }
     });
   };
@@ -782,6 +845,7 @@ function App() {
     setMessages([]);
     setMessageInput('');
     sendingTextRef.current = null;
+    setEngineBusy(false);
   };
 
   const zipFilesAndSetState = async (fileEntries, defaultZipName) => {
@@ -880,8 +944,26 @@ function App() {
   };
 
   const handleSendFile = () => {
-    if (selectedFile && webrtc.current) {
+    if (selectedFile && webrtc.current && !webrtc.current.isSending) {
+      setEngineBusy(true);
       webrtc.current.sendFile(selectedFile);
+    }
+  };
+
+  const handleCopyMessage = (m) => {
+    try {
+      const done = navigator.clipboard?.writeText(m.text);
+      if (done && done.catch) done.catch(() => {});
+    } catch (_) {}
+    setCopiedMsgId(m.id);
+    setTimeout(() => setCopiedMsgId((cur) => (cur === m.id ? null : cur)), 1200);
+  };
+
+  const formatMsgTime = (ts) => {
+    try {
+      return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (_) {
+      return '';
     }
   };
 
@@ -894,6 +976,7 @@ function App() {
     const file = new File([new TextEncoder().encode(text)], `message-${Date.now()}.txt`, { type: 'text/plain' });
     sendingTextRef.current = text;
     setMessageInput('');
+    setEngineBusy(true);
     webrtc.current.sendFile(file, 'text');
   };
 
@@ -935,6 +1018,7 @@ function App() {
     if (webrtc.current) {
       webrtc.current.cancelSend();
     }
+    setEngineBusy(false);
     setSelectedFile(null);
     setSendProgress({
       active: false,
@@ -1337,6 +1421,10 @@ function App() {
                       <span className="settings-knob"></span>
                     </label>
                   </div>
+                  <a className="settings-media-hop" href="/upload" target="_blank" rel="noreferrer">
+                    <Clapperboard size={14} />
+                    <span>Media library</span>
+                  </a>
                 </div>
               </div>
             )}
@@ -1517,8 +1605,17 @@ function App() {
             {messages.length > 0 && (
               <div className="msg-thread" aria-live="polite">
                 {messages.map((m) => (
-                  <div key={m.id} className={`msg-bubble${m.mine ? ' mine' : ''}`}>
-                    {m.text}
+                  <div
+                    key={m.id}
+                    className={`msg-bubble${m.mine ? ' mine' : ''}${copiedMsgId === m.id ? ' copied' : ''}`}
+                    onClick={() => handleCopyMessage(m)}
+                    title={t.copyLink}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCopyMessage(m); }}
+                  >
+                    <span className="msg-text">{renderMsgText(m.text)}</span>
+                    <span className="msg-time">{formatMsgTime(m.time)}</span>
                   </div>
                 ))}
               </div>
@@ -1533,7 +1630,7 @@ function App() {
                 aria-label={t.messagePlaceholder}
                 maxLength={100000}
               />
-              <button className="btn-solid btn-compact" onClick={handleSendText} aria-label={t.sendMessage}>
+              <button className="btn-solid btn-compact" onClick={handleSendText} aria-label={t.sendMessage} disabled={engineBusy}>
                 <Send size={16} />
                 <span>{t.sendMessage}</span>
               </button>
@@ -1637,7 +1734,7 @@ function App() {
                   </p>
                 </div>
                 <div className="staged-buttons">
-                  <button className="btn-solid btn-compact" onClick={handleSendFile}>
+                  <button className="btn-solid btn-compact" onClick={handleSendFile} disabled={engineBusy}>
                     <Send size={15} />
                     <span>{sendProgress.paused ? t.resume : t.sendFile}</span>
                   </button>

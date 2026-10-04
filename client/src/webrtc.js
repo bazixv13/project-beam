@@ -46,6 +46,7 @@ export class WebRTCConnection {
     onPeerZipping,
     onOffline,
     onHandshakeStateChange,
+    onRoomFull,
     forceRelay
   }) {
     this.roomId = roomId;
@@ -57,6 +58,7 @@ export class WebRTCConnection {
     this.onPeerZipping = onPeerZipping || (() => {});
     this.onOffline = onOffline || (() => {});
     this.onHandshakeStateChange = onHandshakeStateChange || (() => {});
+    this.onRoomFull = onRoomFull || (() => {});
 
     this.isConnected = false;
     this.mode = 'ws'; // Start in 'ws' for 0ms instant connection, then auto-upgrade to 'webrtc'
@@ -337,6 +339,11 @@ export class WebRTCConnection {
             console.log('[P2P] Peer left room:', msg.sender);
             this.remotePeerId = null;
             this.handlePeerLeft();
+            break;
+
+          case 'room-full':
+            console.log('[P2P] Room is full, rejected');
+            this.onRoomFull();
             break;
 
           default:

@@ -69,11 +69,14 @@ impl RoomManager {
         let mut entry = self.rooms.entry(room_id.to_string()).or_default();
         entry.retain(|(id, tx)| *id != conn_id && !tx.is_closed());
 
-        // A room strictly connects 2 peers. If stale peers remain, keep at most 1 before adding new.
-        if entry.len() > 1 {
-            let keep = entry.pop().unwrap();
-            entry.clear();
-            entry.push(keep);
+        // A room strictly connects 2 peers. Never evict: a third joiner is
+        // rejected outright so room-code collisions can't hijack an active
+        // transfer or silently drop a peer mid-flight.
+        if entry.len() >= 2 {
+            let _ = sender
+                .send(Message::Text(serde_json::json!({ "type": "room-full" }).to_string()))
+                .await;
+            return;
         }
 
         let existing_peer = entry.first().map(|(id, tx)| (*id, tx.clone()));
