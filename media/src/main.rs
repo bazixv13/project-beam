@@ -8,8 +8,8 @@
 // UPLOAD_PASSWORD env var — anything committed here is visible to readers.
 
 use axum::{
-    body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
+    body::{to_bytes, Body, Bytes},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -26,10 +26,10 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    fs::File,
+    fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
 };
 
@@ -73,6 +73,8 @@ struct AppState {
     progress: Arc<DashMap<String, u64>>,
     /// Total media duration per cache filename (ms), for percent calc.
     totals: Arc<DashMap<String, u64>>,
+    /// In-flight chunked uploads: token -> session.
+    uploads: Arc<DashMap<String, UploadSession>>,
 }
 
 /// Max % of one CPU core a live box transcoding may burn (duty-cycled
@@ -110,8 +112,22 @@ fn new_session_token() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
+    // 8 bytes of real entropy so tokens are unguessable even if the counter
+    // and clock are known (falls back to pid mix on exotic platforms).
+    let mut rnd = [0u8; 8];
+    {
+        use std::io::Read;
+        if std::fs::File::open("/dev/urandom")
+            .and_then(|mut f| f.read_exact(&mut rnd))
+            .is_err()
+        {
+            let pid = std::process::id();
+            rnd[..4].copy_from_slice(&pid.to_ne_bytes());
+            rnd[4..].copy_from_slice(&pid.to_ne_bytes());
+        }
+    }
     let mut h = DefaultHasher::new();
-    (n, t, std::process::id()).hash(&mut h);
+    (n, t, std::process::id(), u64::from_ne_bytes(rnd)).hash(&mut h);
     format!("{:016x}{:08x}", h.finish(), n)
 }
 
@@ -314,37 +330,104 @@ fn library_page(files: &[String]) -> Html<String> {
 <title>Media Library</title>
 <style>html{{background:#000}}body{{background:#000;color:#f4f4f5;font-family:monospace;margin:0;padding:1.5rem;min-height:100vh;min-height:100dvh;box-sizing:border-box}}main{{max-width:640px;margin:0 auto}}h1{{font-size:1.1rem}}form.up{{border:1px solid #27272a;border-radius:8px;padding:1.2rem;display:flex;flex-direction:column;gap:.8rem;margin-bottom:1.5rem}}label{{font-size:.8rem;color:#a1a1aa}}input[type=file]{{color:#a1a1aa}}button{{background:#f4f4f5;color:#000;border:none;border-radius:8px;padding:.8rem;font:inherit;font-weight:700;cursor:pointer}}.row{{display:flex;gap:.8rem;align-items:center;border:1px solid #27272a;border-radius:8px;padding:.7rem .9rem;margin-bottom:.6rem}}.watch{{color:#f4f4f5;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}.del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem}}
 .del.armed{{background:#f4f4f5;color:#000;border-color:#f4f4f5;font-weight:700}}.empty{{color:#71717a}}
-.upprog{{height:8px;background:#27272a;border-radius:4px;overflow:hidden}}.upbar{{height:100%;width:0%;background:#f4f4f5}}.uprow{{display:flex;justify-content:space-between;align-items:center;font-size:.8rem;color:#a1a1aa}}.uperr{{color:#f87171;font-size:.8rem;margin:0}}button:disabled{{opacity:.4;cursor:default}}</style>
+.dz{{border:2px dashed #52525b;border-radius:12px;padding:1.6rem 1.2rem;text-align:center;margin-bottom:1rem;cursor:pointer}}
+.dz.over{{border-color:#f4f4f5;background:#121214}}
+.dz-t{{margin:0 0 .3rem;font-size:.95rem}}.dz-s{{margin:0;font-size:.75rem;color:#71717a}}
+.qitem{{border:1px solid #27272a;border-radius:8px;padding:.7rem .9rem;margin-bottom:.6rem}}
+.qname{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.85rem}}
+.qmeta{{font-size:.75rem;color:#a1a1aa;margin:.25rem 0}}
+.qbarw{{height:8px;background:#27272a;border-radius:4px;overflow:hidden;margin:.3rem 0}}
+.qbar{{height:100%;width:0%;background:#f4f4f5}}
+.qrow{{display:flex;gap:.4rem;margin-top:.3rem;align-items:center;flex-wrap:wrap}}
+.qbtn{{background:transparent;color:#e4e4e7;border:1px solid #52525b;border-radius:6px;padding:.3rem .6rem;font-size:.75rem;font-family:inherit;cursor:pointer}}
+.qsel{{background:#121214;color:#f4f4f5;border:1px solid #52525b;border-radius:6px;padding:.3rem;font-size:.75rem;font-family:inherit;max-width:100%}}
+.xcode{{font-size:.7rem;color:#71717a;flex-shrink:0;white-space:nowrap}}
+.uperr{{color:#f87171;font-size:.8rem;margin:0 0 .6rem}}</style>
 </head><body><main><h1>MEDIA</h1>
-<form class="up" id="upform" method="post" action="/upload/file" enctype="multipart/form-data">
-<label>File (any type, pool max 50 GB)<input type="file" name="video" id="upvideo" required></label>
-<button type="submit" id="upbtn">Upload</button>
-<div class="upprog" id="upprog" hidden><div class="upbar" id="upbar"></div></div>
-<div class="uprow"><span id="uplabel"></span><button type="button" class="del" id="upcancel" hidden>Cancel</button></div>
-<p class="uperr" id="uperr" hidden></p></form>{rows}</main>
+<div class="dz" id="dz"><p class="dz-t">Drop files here or tap to browse</p><p class="dz-s">Resumable chunks · any type · .vtt attaches to a video · pool max 50 GB</p><input type="file" id="dzfile" multiple hidden></div>
+<div id="queue"></div>
+<p class="uperr" id="uperr" hidden></p>{rows}</main>
 <script>
 function armDel(btn){{if(btn.dataset.armed){{btn.closest('form').submit();return false;}}btn.dataset.armed='1';var old=btn.textContent;btn.textContent='Sure?';btn.classList.add('armed');setTimeout(function(){{delete btn.dataset.armed;btn.textContent=old;btn.classList.remove('armed');}},3000);return false;}}
-(function(){{var form=document.getElementById('upform');if(!form)return;
-var bar=document.getElementById('upbar'),prog=document.getElementById('upprog'),lab=document.getElementById('uplabel'),
-cancel=document.getElementById('upcancel'),err=document.getElementById('uperr'),btn=document.getElementById('upbtn'),xhr=null;
+(function(){{var dz=document.getElementById('dz');if(!dz)return;
+var fi=document.getElementById('dzfile'),qv=document.getElementById('queue');
+var CHUNK=8*1024*1024,items=[],active=null;
 function mb(n){{return (n/1048576).toFixed(n<10485760?1:0)+' MB';}}
-form.addEventListener('submit',function(e){{e.preventDefault();err.hidden=true;
-var vf=document.getElementById('upvideo');if(!vf||!vf.files.length)return;
-var fd=new FormData();fd.append('video',vf.files[0]);
-xhr=new XMLHttpRequest();xhr.open('POST','/upload/file',true);
-btn.disabled=true;prog.hidden=false;cancel.hidden=false;bar.style.width='0%';lab.textContent='0%';
-xhr.upload.onprogress=function(ev){{if(!ev.lengthComputable)return;var p=Math.round(ev.loaded/ev.total*100);bar.style.width=p+'%';lab.textContent=p+'% · '+mb(ev.loaded)+' / '+mb(ev.total);}};
-xhr.onload=function(){{btn.disabled=false;cancel.hidden=true;
-if(xhr.status===401){{location.reload();return;}}
-if(xhr.status>=200&&xhr.status<300){{addRow(vf.files[0].name);form.reset();prog.hidden=true;lab.textContent='';}}
-else{{err.textContent='Upload failed ('+xhr.status+'): '+(xhr.responseText||'error').slice(0,200);err.hidden=false;prog.hidden=true;lab.textContent='';}}
-xhr=null;}};
-xhr.onerror=function(){{btn.disabled=false;cancel.hidden=true;err.textContent='Upload failed: network error';err.hidden=false;prog.hidden=true;lab.textContent='';xhr=null;}};
-xhr.onabort=function(){{btn.disabled=false;cancel.hidden=true;lab.textContent='Cancelled';bar.style.width='0%';xhr=null;}};
-xhr.send(fd);}});
-cancel.addEventListener('click',function(){{if(xhr)xhr.abort();}});
-function addRow(name){{var empty=document.querySelector('main .empty');if(empty)empty.remove();
-var isVid=/\.(mov|mp4)$/i.test(name);
+function eta(s){{if(!isFinite(s)||s<0)return '';s=Math.round(s);if(s<60)return s+'s left';return Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+' left';}}
+function ukey(it){{return 'beam-up-'+it.size+'-'+it.name;}}
+function vids(){{var a=[],els=document.querySelectorAll('.row .watch');for(var i=0;i<els.length;i++)a.push(els[i].textContent);return a;}}
+dz.addEventListener('click',function(){{fi.click();}});
+['dragenter','dragover'].forEach(function(ev){{dz.addEventListener(ev,function(e){{e.preventDefault();dz.classList.add('over');}});}});
+['dragleave','drop'].forEach(function(ev){{dz.addEventListener(ev,function(e){{e.preventDefault();dz.classList.remove('over');}});}});
+dz.addEventListener('drop',function(e){{if(e.dataTransfer&&e.dataTransfer.files)addFiles(e.dataTransfer.files);}});
+fi.addEventListener('change',function(){{addFiles(fi.files);fi.value='';}});
+function addFiles(list){{for(var i=0;i<list.length;i++){{var f=list[i];var dup=false;for(var j=0;j<items.length;j++)if(items[j].name===f.name&&items[j].size===f.size){{dup=true;break;}}if(dup||!f.size)continue;
+var it={{f:f,name:f.name,size:f.size,received:0,token:null,cap:/\.vtt$/i.test(f.name),target:null,state:'queued',err:''}};
+items.push(it);render(it);
+if(it.cap){{/* waits for target pick */}}else resumeCheck(it);}}
+pump();}}
+function render(it){{var el=document.getElementById(it.el);if(!el){{el=document.createElement('div');el.className='qitem';el.id='q'+(it.el=items.indexOf(it)+'_'+Date.now());qv.appendChild(el);}}
+var p=it.size?Math.round(it.received/it.size*100):0;
+var h='<div class="qname">'+it.name.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</div>';
+if(it.cap){{h+='<div class="qmeta">subtitle → <select class="qsel" data-q="t">'+targetOpts(it.target)+'</select></div>';}}
+h+='<div class="qbarw"><div class="qbar" data-q="b" style="width:'+p+'%"></div></div>';
+h+='<div class="qmeta" data-q="m">'+metaText(it,p)+'</div><div class="qrow" data-q="r">'+btns(it)+'</div>';
+el.innerHTML=h;
+var btns2=el.querySelectorAll('button');for(var i=0;i<btns2.length;i++)btns2[i].onclick=btnAct(it,btns2[i].getAttribute('data-a'));
+var sel=el.querySelector('select');if(sel)sel.onchange=function(){{it.target=sel.value||null;if(it.target){{it.state='queued';it.err='';pump();}}render(it);}};}}
+function targetOpts(cur){{var o='<option value="">pick a video…</option>';var vs=vids();for(var i=0;i<vs.length;i++){{var v=vs[i].replace(/&/g,'&amp;').replace(/</g,'&lt;');o+='<option value="'+vs[i].replace(/"/g,'&quot;')+'"'+(vs[i]===cur?' selected':'')+'>'+v+'</option>';}}return o;}}
+function metaText(it,p){{if(it.state==='error')return 'Error: '+it.err;if(it.state==='done')return 'Done ✓';if(it.cap&&!it.target)return mb(it.size)+' · pick a video above to attach';var s=p+'% · '+mb(it.received)+' / '+mb(it.size);if(it.state==='active'&&it._spd)s+=' · '+mb(it._spd)+'/s '+eta(it._eta);if(it.state==='paused')s+=' · paused';return s;}}
+function btns(it){{if(it.state==='done')return '';if(it.state==='active')return '<button class="qbtn" data-a="pause">Pause</button><button class="qbtn" data-a="cancel">Cancel</button>';if(it.state==='paused')return '<button class="qbtn" data-a="resume">Resume</button><button class="qbtn" data-a="cancel">Cancel</button>';if(it.state==='error')return '<button class="qbtn" data-a="retry">Retry</button><button class="qbtn" data-a="cancel">Cancel</button>';return '<button class="qbtn" data-a="cancel">Cancel</button>';}}
+function btnAct(it,a){{return function(){{if(a==='pause'&&it===active){{it.state='paused';render(it);active=null;pump();}}else if(a==='resume'){{it.state='queued';it.err='';render(it);pump();}}else if(a==='retry'){{it.state='queued';it.err='';render(it);pump();}}else if(a==='cancel'){{cancelItem(it);}};}};}}
+function cancelItem(it){{var t=it.token;it.state='cancelled';var el=document.getElementById(it.el);if(el)el.remove();items.splice(items.indexOf(it),1);try{{localStorage.removeItem(ukey(it));}}catch(_e){{}}if(t)fetch('/upload/cancel',{{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:'token='+encodeURIComponent(t),credentials:'same-origin'}}).catch(function(){{}});if(active===it){{active=null;pump();}}}}
+function resumeCheck(it){{var raw=null;try{{raw=localStorage.getItem(ukey(it));}}catch(_e){{}}if(!raw)return;var tk=null;try{{tk=JSON.parse(raw).token;}}catch(_e){{}}if(!tk)return;it.token=tk;
+fetch('/upload/status?name='+encodeURIComponent(it.name)+'&size='+it.size,{{credentials:'same-origin'}}).then(function(r){{if(!r.ok)throw 0;return r.json();}}).then(function(j){{it.token=j.token;it.received=j.received||0;try{{localStorage.setItem(ukey(it),JSON.stringify({{token:it.token}}));}}catch(_e){{}}render(it);pump();}}).catch(function(){{it.token=null;}});}}
+function pump(){{if(active)return;for(var i=0;i<items.length;i++){{var it=items[i];if(it.state==='queued'&&(!it.cap||it.target)){{active=it;run(it);return;}}}}}}
+async function run(it){{it.state='active';it.err='';render(it);
+try{{
+if(!it.token){{var sp=new URLSearchParams();sp.append('name',it.name);sp.append('size',String(it.size));sp.append('kind',it.cap?'caption':'video');if(it.cap)sp.append('for_video',it.target);
+var sr=await fetch('/upload/start',{{method:'POST',body:sp,credentials:'same-origin'}});
+if(sr.status===401){{location.reload();return;}}
+if(!sr.ok)throw new Error(await sr.text().then(function(t){{return t.slice(0,100);}}));
+var sj=await sr.json();it.token=sj.token;it.received=sj.received||0;
+try{{localStorage.setItem(ukey(it),JSON.stringify({{token:it.token}}));}}catch(_e){{}}}}
+var lastT=Date.now(),lastB=it.received;it._spd=0;it._eta=0;
+while(it.received<it.size){{if(it.state!=='active')return;
+var end=Math.min(it.received+CHUNK,it.size);
+var r=await fetch('/upload/chunk?token='+encodeURIComponent(it.token)+'&offset='+it.received,{{method:'POST',body:it.f.slice(it.received,end),credentials:'same-origin'}});
+if(r.status===401){{location.reload();return;}}
+if(r.status===409){{var cj=await r.json();it.received=cj.received;continue;}}
+if(r.status===404){{it.token=null;try{{localStorage.removeItem(ukey(it));}}catch(_e){{}}throw new Error('session lost, retry');}}
+if(!r.ok)throw new Error('chunk '+r.status);
+var j=await r.json();it.received=j.received;
+var now=Date.now(),dt=(now-lastT)/1000;if(dt>0.5){{it._spd=(it.received-lastB)/dt;lastT=now;lastB=it.received;it._eta=it._spd>0?(it.size-it.received)/it._spd:-1;}}
+render(it);}}
+var fr=await fetch('/upload/finish',{{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:'token='+encodeURIComponent(it.token),credentials:'same-origin'}});
+if(!fr.ok)throw new Error('finish failed');
+var fj=await fr.json();
+try{{localStorage.removeItem(ukey(it));}}catch(_e){{}}
+it.state='done';it.received=it.size;
+if(!it.cap)addRow(fj.name);
+render(it);
+setTimeout(function(){{var el=document.getElementById(it.el);if(el)el.remove();var ix=items.indexOf(it);if(ix>=0)items.splice(ix,1);}},6000);
+}}catch(e){{it.state='error';it.err=String((e&&e.message)||e).slice(0,120);render(it);}}
+active=null;pump();}}
+// Subtle transcode hint on library rows: polls in-flight extractions and
+// tags matching rows with a small gray percent. Nothing flashes, no layout
+// shift — the span appears and quietly disappears when done.
+function pollXcode(){{fetch('/upload/transcodes',{{credentials:'same-origin'}}).then(function(r){{return r.ok?r.json():[];}}).then(function(list){{
+var rows=document.querySelectorAll('.row');
+for(var i=0;i<rows.length;i++){{var a=rows[i].querySelector('.watch');if(!a)continue;
+var mark=null;for(var k=0;k<list.length;k++)if(list[k].name===a.textContent){{mark=list[k];break;}}
+var old=rows[i].querySelector('.xcode');
+if(!mark){{if(old)old.remove();continue;}}
+var txt=mark.kind==='audio'?'sound':'subs';
+if(mark.progress!=null)txt+=' '+mark.progress+'%';
+else txt+=' …';
+if(old)old.textContent=txt;
+else{{var s=document.createElement('span');s.className='xcode';s.textContent=txt;a.parentNode.insertBefore(s,a.nextSibling);}}}}}}).catch(function(){{}});}}
+setInterval(pollXcode,4000);pollXcode();
+function addRow(name){{var empty=document.querySelector('main .empty');if(empty)empty.remove();var isVid=/\.(mov|mp4|mkv)$/i.test(name);
 var div=document.createElement('div');div.className='row';
 var a=document.createElement('a');a.className='watch';a.textContent=name;
 a.href=isVid?'/watch?v='+encodeURIComponent(name):'/media/'+encodeURIComponent(name)+'?dl=1';
@@ -353,7 +436,7 @@ var h=document.createElement('input');h.type='hidden';h.name='name';h.value=name
 var b=document.createElement('button');b.className='del';b.type='button';b.textContent='Delete';
 b.setAttribute('onclick','return armDel(this)');
 f.appendChild(h);f.appendChild(b);div.appendChild(a);div.appendChild(f);
-var up=document.getElementById('upform');up.parentNode.insertBefore(div,up.nextSibling);}}
+var qv2=document.getElementById('queue');qv2.parentNode.insertBefore(div,qv2.nextSibling);}}
 }})();
 </script></body></html>"#,
         rows = rows
@@ -389,123 +472,335 @@ async fn upload_login(
     ([(header::SET_COOKIE, cookie)], Redirect::to("/upload")).into_response()
 }
 
-async fn upload_file(
+// ============ RESUMABLE CHUNKED UPLOADS ============
+// Single-POST uploads die with the connection on multi-GB files, so the
+// client splits every file into ordered chunks:
+//
+//   POST /upload/start  {name, size, kind, for?, label?} -> {token, received}
+//   POST /upload/chunk?token=&offset=  (octet-stream body) -> {received}
+//   POST /upload/finish {token} -> {name}
+//
+// A dropped connection only loses the in-flight chunk: the client re-asks
+// /upload/status?name=&size= (or reuses its token) and resumes at `received`.
+// Chunk tmp files are hidden `.upload-<token>.part` names, published by
+// atomic rename on finish. Sessions idle >24h are swept with their tmps.
+
+/// Max bytes accepted in one chunk POST (client sends 8 MiB).
+const MAX_CHUNK_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug, Clone)]
+struct UploadSession {
+    /// Final filename in the media dir.
+    name: String,
+    /// Declared total size; finish requires received == size.
+    size: u64,
+    received: u64,
+    tmp: PathBuf,
+    /// Caption sidecar (final name derived) vs plain file.
+    caption: bool,
+    updated: Instant,
+}
+
+fn upload_tmp_name(token: &str) -> String {
+    format!(".upload-{}.part", token)
+}
+
+#[derive(Deserialize)]
+struct UploadStart {
+    name: String,
+    size: u64,
+    /// "video" (any allowed file) or "caption" (.vtt for an existing video).
+    kind: String,
+    /// Caption target video (required when kind == "caption").
+    #[serde(default)]
+    for_video: String,
+}
+
+/// Kick the default-audio extraction for a freshly finished video, but only
+/// when the container default is not browser-playable (nothing to do for
+/// plain AAC/MP3). Runs through the same atomic run_extract machinery as
+/// on-demand prepares.
+async fn maybe_transcode_finished(state: &AppState, video: &str) {
+    let path = state.media_dir.join(video);
+    let (_, audios) = match probe_tracks(&path).await {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let Some(def) = audios.iter().find(|a| a.is_default) else {
+        return;
+    };
+    if audio_native_playable(&def.codec) {
+        return;
+    }
+    let cache = audio_cache_name(video, def.index);
+    let dst = state.media_dir.join(&cache);
+    if tokio::fs::metadata(&dst).await.is_ok() || !state.extracting.insert(cache.clone()) {
+        return;
+    }
+    let tmp = state.media_dir.join(format!("{}.part", &cache));
+    let args = vec![
+        "-map".to_string(),
+        format!("0:{}", def.index),
+        "-vn".to_string(),
+        "-c:a".to_string(),
+        "aac".to_string(),
+        "-b:a".to_string(),
+        "160k".to_string(),
+    ];
+    let st = state.clone();
+    tokio::spawn(run_extract(path, args, "mp4", tmp, dst, cache, st));
+}
+
+async fn upload_start(
     State(state): State<AppState>,
     headers: HeaderMap,
-    mut multipart: Multipart,
+    axum::Form(form): axum::Form<UploadStart>,
 ) -> Response {
     if !authed(&headers, &state.sessions) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let mut video_name: Option<String> = None;
-    let mut caption_bytes: Option<Vec<u8>> = None;
-    let mut caption_name: Option<String> = None;
-    let mut caption_for: Option<String> = None;
-    let mut total: u64 = 0;
-    let max_bytes = max_upload_bytes();
-    let pool_used = dir_usage(&state.media_dir).await;
-
-    while let Ok(Some(mut field)) = multipart.next_field().await {
-        let field_name = field.name().unwrap_or("").to_string();
-        if field_name == "video" {
-            let raw = field.file_name().unwrap_or("").to_string();
-            let Some(name) = safe_file_name(&raw) else {
-                return (StatusCode::BAD_REQUEST, "File type not allowed").into_response();
-            };
-            // Belt and suspenders: join() can never escape the media dir
-            // because safe_file_name strips every path separator.
-            let path = state.media_dir.join(&name);
-            let Ok(mut out) = File::create(&path).await else {
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            };
-            // Track clean EOF: a disconnect mid-stream surfaces as Err here,
-            // and must delete the truncated partial — never keep it silently.
-            let mut clean_eof = false;
-            loop {
-                match field.chunk().await {
-                    Ok(Some(chunk)) => {
-                        total += chunk.len() as u64;
-                        if total > max_bytes || pool_used.saturating_add(total) > MAX_POOL_BYTES {
-                            drop(out);
-                            let _ = tokio::fs::remove_file(&path).await;
-                            return (StatusCode::PAYLOAD_TOO_LARGE, "File too large").into_response();
-                        }
-                        if out.write_all(&chunk).await.is_err() {
-                            let _ = tokio::fs::remove_file(&path).await;
-                            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                        }
-                    }
-                    Ok(None) => {
-                        clean_eof = true;
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-            if !clean_eof {
-                drop(out);
-                let _ = tokio::fs::remove_file(&path).await;
-                return (StatusCode::BAD_GATEWAY, "Upload interrupted").into_response();
-            }
-            if out.flush().await.is_err() {
-                let _ = tokio::fs::remove_file(&path).await;
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-            video_name = Some(name);
-        } else if field_name == "captions" {
-            let mut buf = Vec::new();
-            let raw_vtt = field.file_name().unwrap_or("").to_string();
-            while let Ok(Some(chunk)) = field.chunk().await {
-                total += chunk.len() as u64;
-                if total > max_bytes || buf.len() > MAX_SUBTITLE_BYTES {
-                    return (StatusCode::PAYLOAD_TOO_LARGE, "Captions too large").into_response();
-                }
-                buf.extend_from_slice(&chunk);
-            }
-            if !buf.is_empty() {
-                caption_bytes = Some(buf);
-                caption_name = Some(raw_vtt);
-            }
-        } else if field_name == "for" {
-            // Captions-only upload targets an already-stored video by name.
-            let mut buf = Vec::new();
-            while let Ok(Some(chunk)) = field.chunk().await {
-                buf.extend_from_slice(&chunk);
-                if buf.len() > 512 {
-                    break;
-                }
-            }
-            caption_for = Some(String::from_utf8_lossy(&buf).trim().to_string());
-        }
+    let is_caption = form.kind.as_str() == "caption";
+    if form.size == 0 {
+        return (StatusCode::BAD_REQUEST, "Empty file").into_response();
     }
-
-    // Captions-only upload: attach a .vtt to an existing video. The stored
-    // name is <video-stem>.<uploaded-label>.vtt so several languages can
-    // coexist; a bare name collapses to <video-stem>.vtt.
-    if video_name.is_none() {
-        if let (Some(target), Some(vtt)) = (caption_for, caption_bytes) {
-            if let Some(name) = safe_media_name(&target) {
-                if tokio::fs::metadata(state.media_dir.join(&name)).await.is_ok() {
-                    let file_name = caption_file_name(&name, caption_name.as_deref());
-                    let _ = tokio::fs::write(state.media_dir.join(file_name), vtt).await;
-                    return Redirect::to("/upload").into_response();
-                }
-            }
+    // Resolve + validate the final filename first: resume matches on it.
+    let name = if is_caption {
+        let Some(target) = safe_media_name(&form.for_video) else {
+            return (StatusCode::BAD_REQUEST, "Unknown target video").into_response();
+        };
+        if tokio::fs::metadata(state.media_dir.join(&target)).await.is_err() {
+            return (StatusCode::NOT_FOUND, "Target video not stored").into_response();
         }
-        return (StatusCode::BAD_REQUEST, "Missing video file").into_response();
-    }
-
-    let Some(name) = video_name else {
-        return (StatusCode::BAD_REQUEST, "Missing video file").into_response();
+        let derived = caption_file_name(&target, Some(&form.name));
+        let Some(valid) = safe_file_name(&derived) else {
+            return (StatusCode::BAD_REQUEST, "Bad caption name").into_response();
+        };
+        if form.size as usize > MAX_SUBTITLE_BYTES {
+            return (StatusCode::PAYLOAD_TOO_LARGE, "Captions too large").into_response();
+        }
+        valid
+    } else {
+        if form.kind.as_str() != "video" {
+            return (StatusCode::BAD_REQUEST, "Bad kind").into_response();
+        }
+        let Some(valid) = safe_file_name(&form.name) else {
+            return (StatusCode::BAD_REQUEST, "File type not allowed").into_response();
+        };
+        if form.size > max_upload_bytes() {
+            return (StatusCode::PAYLOAD_TOO_LARGE, "File too large").into_response();
+        }
+        valid
     };
-    // Captions ride along under the same labeled scheme.
-    if let Some(vtt) = caption_bytes {
-        let caption_path = state
-            .media_dir
-            .join(caption_file_name(&name, caption_name.as_deref()));
-        let _ = tokio::fs::write(&caption_path, vtt).await;
+    if dir_usage(&state.media_dir).await.saturating_add(form.size) > MAX_POOL_BYTES {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "Library full").into_response();
     }
-    Redirect::to("/upload").into_response()
+    // Resume: same final name + size already in flight.
+    for entry in state.uploads.iter() {
+        let s = entry.value();
+        if s.name == name && s.size == form.size {
+            return axum::Json(serde_json::json!({
+                "token": entry.key(),
+                "received": s.received,
+            }))
+            .into_response();
+        }
+    }
+    let token = new_session_token();
+    let tmp = state.media_dir.join(upload_tmp_name(&token));
+    // A stale tmp from a dead session (pre-restart crash) restarts clean.
+    let received = match tokio::fs::metadata(&tmp).await {
+        Ok(_) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            0
+        }
+        Err(_) => 0,
+    };
+    state.uploads.insert(
+        token.clone(),
+        UploadSession {
+            name,
+            size: form.size,
+            received,
+            tmp,
+            caption: is_caption,
+            updated: Instant::now(),
+        },
+    );
+    axum::Json(serde_json::json!({ "token": token, "received": received })).into_response()
+}
+
+#[derive(Deserialize)]
+struct UploadChunkQuery {
+    token: String,
+    offset: u64,
+}
+
+async fn upload_chunk(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<UploadChunkQuery>,
+    body: Body,
+) -> Response {
+    if !authed(&headers, &state.sessions) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let mut entry = match state.uploads.get_mut(&q.token) {
+        Some(e) => e,
+        None => return (StatusCode::NOT_FOUND, "Unknown upload, restart it").into_response(),
+    };
+    if q.offset != entry.received {
+        let received = entry.received;
+        drop(entry);
+        return (
+            StatusCode::CONFLICT,
+            axum::Json(serde_json::json!({ "received": received })),
+        )
+            .into_response();
+    }
+    let bytes = match to_bytes(body, MAX_CHUNK_BYTES).await {
+        Ok(b) => b,
+        Err(_) => return (StatusCode::BAD_GATEWAY, "Chunk interrupted").into_response(),
+    };
+    if bytes.is_empty() {
+        let received = entry.received;
+        drop(entry);
+        return axum::Json(serde_json::json!({ "received": received })).into_response();
+    }
+    if entry.received + bytes.len() as u64 > entry.size {
+        return (StatusCode::BAD_REQUEST, "Chunk overruns declared size").into_response();
+    }
+    let mut out = match OpenOptions::new().create(true).append(true).open(&entry.tmp).await {
+        Ok(f) => f,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    if out.write_all(&bytes).await.is_err() || out.flush().await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    drop(out);
+    entry.received += bytes.len() as u64;
+    entry.updated = Instant::now();
+    let received = entry.received;
+    drop(entry);
+    axum::Json(serde_json::json!({ "received": received })).into_response()
+}
+
+#[derive(Deserialize)]
+struct UploadFinish {
+    token: String,
+}
+
+async fn upload_finish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<UploadFinish>,
+) -> Response {
+    if !authed(&headers, &state.sessions) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let session = match state.uploads.get(&form.token) {
+        Some(e) => e.clone(),
+        None => return (StatusCode::NOT_FOUND, "Unknown upload").into_response(),
+    };
+    if session.received != session.size {
+        return (StatusCode::CONFLICT, "Upload incomplete").into_response();
+    }
+    let dst = state.media_dir.join(&session.name);
+    if tokio::fs::rename(&session.tmp, &dst).await.is_err() {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    state.uploads.remove(&form.token);
+    // Fire-and-forget: undecodable default audio starts transcoding now,
+    // playable files need nothing.
+    if !session.caption {
+        if safe_media_name(&session.name).is_some() {
+            maybe_transcode_finished(&state, &session.name).await;
+        }
+    }
+    axum::Json(serde_json::json!({ "name": session.name })).into_response()
+}
+
+async fn upload_cancel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Form(form): axum::Form<UploadFinish>,
+) -> Response {
+    if !authed(&headers, &state.sessions) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if let Some((_, session)) = state.uploads.remove(&form.token) {
+        let _ = tokio::fs::remove_file(&session.tmp).await;
+    }
+    StatusCode::OK.into_response()
+}
+
+#[derive(Deserialize)]
+struct UploadStatusQuery {    name: String,
+    size: u64,
+}
+
+async fn upload_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<UploadStatusQuery>,
+) -> Response {
+    if !authed(&headers, &state.sessions) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    for entry in state.uploads.iter() {
+        let s = entry.value();
+        if s.name == q.name && s.size == q.size {
+            return axum::Json(serde_json::json!({
+                "token": entry.key(),
+                "received": s.received,
+            }))
+            .into_response();
+        }
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
+
+/// Live transcodings per library video, for the subtle library-page hint:
+/// [{name, kind ("audio"|"sub"), progress}] — only in-flight jobs.
+async fn upload_transcodes(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authed(&headers, &state.sessions) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if state.extracting.is_empty() {
+        return axum::Json(serde_json::json!([])).into_response();
+    }
+    let mut out = Vec::new();
+    for name in library_entries(&state.media_dir).await {
+        if safe_media_name(&name).is_none() {
+            continue;
+        }
+        let stem = media_stem(&name).to_string();
+        for entry in state.extracting.iter() {
+            let cache = entry.key();
+            if !cache.starts_with(&format!("{}.", stem)) || !is_cache_file(cache) {
+                continue;
+            }
+            let kind = if cache.ends_with(".m4a") { "audio" } else { "sub" };
+            out.push(serde_json::json!({
+                "name": name,
+                "kind": kind,
+                "progress": extract_pct(&state, cache),
+            }));
+        }
+    }
+    axum::Json(serde_json::json!(out)).into_response()
+}
+
+/// Drop sessions idle >24h with their tmps; also purges stray tmps.
+async fn sweep_uploads(state: &AppState) {    let stale: Vec<(String, PathBuf)> = state
+        .uploads
+        .iter()
+        .filter(|e| e.value().updated.elapsed() > std::time::Duration::from_secs(86400))
+        .map(|e| (e.key().clone(), e.value().tmp.clone()))
+        .collect();
+    for (token, tmp) in stale {
+        state.uploads.remove(&token);
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
 }
 
 /// Storage name for an uploaded caption: <video-stem>.<label>.vtt so
@@ -769,7 +1064,12 @@ function applyCue(){{cueStyle.textContent='::cue{{font-size:'+cueSize+'px;color:
 function bumpCue(d){{cueSize=Math.min(48,Math.max(12,cueSize+d));applyCue();}}
 applyCue();
 cc.addEventListener('click',function(e){{e.stopPropagation();buildMenu(currentSel());ccmenu.classList.toggle('open');poke();}});
-ccfile.addEventListener('change',function(){{var f=ccfile.files[0];if(!f)return;if(f.size>50*1024*1024){{ccfile.value='';return;}}var fd=new FormData();fd.append('captions',f,f.name);var vn=decodeURIComponent('{media}').split('/').pop();fd.append('for',vn);fetch('/upload/file',{{method:'POST',body:fd,credentials:'same-origin'}}).then(function(r){{if(r.ok)location.reload();}}).catch(function(){{}});ccfile.value='';}});
+ccfile.addEventListener('change',function(){{var f=ccfile.files[0];if(!f)return;if(f.size>50*1024*1024||!f.size){{ccfile.value='';return;}}var vn=decodeURIComponent('{media}').split('/').pop();upSidecar(f,vn).then(function(ok){{if(ok)location.reload();}}).catch(function(){{}});ccfile.value='';}});
+function upSidecar(f,target){{var CH=8*1024*1024;function qp(p,init){{return fetch(p,init);}}
+return qp('/upload/start',{{method:'POST',body:new URLSearchParams({{name:f.name,size:String(f.size),kind:'caption',for_video:target}}),credentials:'same-origin'}}).then(function(r){{if(!r.ok)throw 0;return r.json();}}).then(function(sj){{var off=sj.received||0;
+function next(){{if(off>=f.size){{return qp('/upload/finish',{{method:'POST',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:'token='+encodeURIComponent(sj.token),credentials:'same-origin'}}).then(function(r){{return r.ok;}});}}
+return qp('/upload/chunk?token='+encodeURIComponent(sj.token)+'&offset='+off,{{method:'POST',body:f.slice(off,Math.min(off+CH,f.size)),credentials:'same-origin'}}).then(function(r){{if(r.status===409)return r.json().then(function(j){{off=j.received;return next();}});if(!r.ok)throw 0;return r.json();}}).then(function(j){{if(j&&j.received!==undefined)off=j.received;return next();}});}}
+return next();}});}}
 fs.addEventListener('click',function(e){{e.stopPropagation();if(document.fullscreenElement)document.exitFullscreen();else if(stage.requestFullscreen)stage.requestFullscreen();else if(v.webkitEnterFullscreen)v.webkitEnterFullscreen();}});
 document.addEventListener('click',function(e){{if(!e.target.closest||!e.target.closest('.cc-wrap')){{ccmenu.classList.remove('open');aumenu.classList.remove('open');}}}});
 document.addEventListener('click',function(e){{var b=e.target.closest?e.target.closest('button'):null;if(b)b.blur();}});
@@ -1473,12 +1773,33 @@ async fn main() {
         extracting: Arc::new(DashSet::new()),
         progress: Arc::new(DashMap::new()),
         totals: Arc::new(DashMap::new()),
+        uploads: Arc::new(DashMap::new()),
     };
+
+    // Hourly sweep of uploads idle >24h.
+    {
+        let sweep_state = state.clone();
+        tokio::spawn(async move {
+            use tokio::time::{sleep, Duration};
+            loop {
+                sleep(Duration::from_secs(3600)).await;
+                sweep_uploads(&sweep_state).await;
+            }
+        });
+    }
 
     let app = Router::new()
         .route("/upload", get(upload_page).post(upload_login))
-        .route("/upload/file", post(upload_file).route_layer(DefaultBodyLimit::disable()))
         .route("/upload/delete", post(upload_delete))
+        .route("/upload/start", post(upload_start))
+        .route(
+            "/upload/chunk",
+            post(upload_chunk).route_layer(DefaultBodyLimit::disable()),
+        )
+        .route("/upload/finish", post(upload_finish))
+        .route("/upload/cancel", post(upload_cancel))
+        .route("/upload/status", get(upload_status))
+        .route("/upload/transcodes", get(upload_transcodes))
         .route("/watch", get(watch_page))
         .route("/media/:name", get(media_file))
         .route("/captions/:name", get(captions_file))
@@ -1487,6 +1808,17 @@ async fn main() {
         .route("/audio", get(serve_audio))
         .with_state(state);
 
+    // Crash leftovers from chunked uploads never survive a restart: their
+    // sessions are gone, so their hidden tmps would stall `start` forever.
+    if let Ok(mut rd) = tokio::fs::read_dir(&media_dir).await {
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            if let Some(s) = entry.file_name().to_str() {
+                if s.starts_with(".upload-") && s.ends_with(".part") {
+                    let _ = tokio::fs::remove_file(entry.path()).await;
+                }
+            }
+        }
+    }
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!(">>> beam-media running on http://0.0.0.0:{}", port);
     println!(">>> Media dir: {:?}", media_dir);
