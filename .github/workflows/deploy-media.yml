@@ -7,7 +7,8 @@ name: Deploy Media Service Dev (beam-media)
 #      "CPU_LIMIT_PCT=50" (caps live box transcodings at 50% of one core)
 #      and EnvironmentFile holding UPLOAD_PASSWORD (never commit the secret).
 #   2. Reverse proxy (Caddy) routing /upload*, /watch*, /media/*, /captions/*,
-#      /tracks*, /audio* (paths preserved) to 127.0.0.1:3005 on the dev domain.
+#      /tracks*, /audio* (paths preserved) to 127.0.0.1:3005 on BOTH the dev
+#      domain and the prod domain (single backend + media dir = shared assets).
 #   3. Reuse the existing SSH_PRIVATE_KEY / REMOTE_USER / REMOTE_HOST secrets.
 
 on:
