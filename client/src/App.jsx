@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
-import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check, Settings, Home } from 'lucide-react';
+import { Send, FileUp, FolderUp, X, Camera, CameraOff, Sun, Moon, LogOut, Copy, Check, Settings, Home, Clapperboard } from 'lucide-react';
 import { WebRTCConnection } from './webrtc';
 import './index.css';
 
@@ -1385,7 +1385,11 @@ function App() {
                       <span className="settings-knob"></span>
                     </label>
                   </div>
-                  <a className="settings-media-link" href="/upload" target="_blank" rel="noreferrer">MEDIA →</a>
+                  <a className="settings-media-hop" href="/upload" target="_blank" rel="noreferrer">
+                    <Clapperboard size={14} />
+                    <span>Media library</span>
+                    <span className="settings-media-go" aria-hidden="true">→</span>
+                  </a>
                 </div>
               </div>
             )}

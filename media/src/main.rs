@@ -351,11 +351,7 @@ fn fmt_size(b: u64) -> String {
 
 // Displayed in the library header on hover. Deliberately SEPARATE from the
 // main BEAM app versioning (that client is v1.3.x). The number comes from
-// Cargo.toml (bump it for meaning); the short git hash is baked in
-// automatically at compile time by build.rs, so every deploy reports the
-// exact commit it runs.
-const MEDIA_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH"));
-// Short display string (layout-stable); the full hash rides in the tooltip.
+// Cargo.toml; build.rs also bakes the git hash in (GIT_HASH) for future use.
 const MEDIA_VERSION_SHORT: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
 fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
@@ -417,7 +413,7 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
 .del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem;min-height:44px;min-width:44px}}
 @media (max-width:480px){{body{{padding:1rem}}.dz{{padding:1.2rem .8rem}}.row{{padding:.6rem .7rem;gap:.6rem}}.fsize{{font-size:.68rem}}}}
 .uperr{{color:#f87171;font-size:.8rem;margin:0 0 .6rem}}</style>
-</head><body><main><h1 class="brand"><span class="swap" id="swap" title="{mver}"><span id="beamlogo">BEAM</span><span id="beamver">{mvershort}</span></span> <span class="media-sub">MEDIA</span></h1>
+</head><body><main><h1 class="brand"><span class="swap" id="swap"><span id="beamlogo">BEAM</span><span id="beamver">{mvershort}</span></span> <span class="media-sub">MEDIA</span></h1>
 <p class="pool">{pool_txt}</p><div class="poolbarw"><div class="poolbar" style="width:{pool_pct}%"></div></div>
 <div class="dz" id="dz"><p class="dz-t">Drop files here or tap to browse</p><p class="dz-s">Resumable chunks · any type · .vtt attaches to a video · pool max 50 GB</p><input type="file" id="dzfile" multiple hidden></div>
 <div id="queue"></div>
@@ -536,7 +532,6 @@ var qv2=document.getElementById('queue');qv2.parentNode.insertBefore(div,qv2.nex
         rows = rows,
         pool_txt = format!("{} / 50 GB used", fmt_size(pool_used)),
         pool_pct = (pool_used * 100 / MAX_POOL_BYTES).min(100),
-        mver = MEDIA_VERSION,
         mvershort = MEDIA_VERSION_SHORT
     ))
 }
