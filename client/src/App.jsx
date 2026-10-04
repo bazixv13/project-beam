@@ -193,26 +193,43 @@ function getInitialRoomState() {
   return { roomId: '', isInitiator: false, connectionState: 'disconnected' };
 }
 
-const APP_VERSION = 'v1.3.24';
+const APP_VERSION = 'v1.3.25';
 
 function BrandTitle({ onGoHome, homeLabel, logoRefresh = true, logoHome = true }) {
   const [hovered, setHovered] = useState(false);
   const revertTimer = useRef(null);
+  const holdTimer = useRef(null);
+
+  const clearTimers = () => {
+    if (revertTimer.current) clearTimeout(revertTimer.current);
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+  };
 
   const handleMouseEnter = () => {
-    setHovered(true);
-    if (revertTimer.current) clearTimeout(revertTimer.current);
-    revertTimer.current = setTimeout(() => {
-      setHovered(false);
-    }, 6000);
+    clearTimers();
+    if (!logoHome) {
+      // Home button off: hold-to-reveal — version appears after a 2s hold,
+      // then hides 4s later (same rhythm as the media library brand).
+      holdTimer.current = setTimeout(() => {
+        setHovered(true);
+        revertTimer.current = setTimeout(() => {
+          setHovered(false);
+        }, 4000);
+      }, 2000);
+    } else {
+      setHovered(true);
+      revertTimer.current = setTimeout(() => {
+        setHovered(false);
+      }, 6000);
+    }
   };
 
   const handleMouseLeave = () => {
-    if (revertTimer.current) clearTimeout(revertTimer.current);
+    clearTimers();
     setHovered(false);
   };
 
-  useEffect(() => () => { if (revertTimer.current) clearTimeout(revertTimer.current); }, []);
+  useEffect(() => () => { clearTimers(); }, []);
 
   return (
     <span

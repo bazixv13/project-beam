@@ -124,7 +124,7 @@ body {
 
 /* invisible width-holder — set to whichever string is wider */
 .brand-title::after {
-  content: 'v1.3.24  ⌂';
+  content: 'v1.3.25  ⌂';
   visibility: hidden;
   height: 0;
   overflow: hidden;
