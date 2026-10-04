@@ -107,6 +107,7 @@ body {
 .brand {
   display: flex;
   align-items: center;
+  gap: 0.4rem;
 }
 
 .brand-title {
@@ -196,7 +197,13 @@ body {
   position: relative;
   display: inline-flex;
   align-items: center;
-  margin-left: 0.5rem;
+  margin-left: 0;
+}
+
+/* Home-on reserves icon width invisibly, pushing the badge out — tuck the
+   badge back so it hugs the logo like the media header does */
+.brand-title.with-home + .mode-badge-wrapper {
+  margin-left: -0.7rem;
 }
 
 .mode-badge-wrapper .mode-indicator {
