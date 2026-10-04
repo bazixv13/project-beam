@@ -283,7 +283,7 @@ fn login_page() -> Html<String> {
     )
 }
 
-async fn library_entries(dir: &PathBuf) -> Vec<String> {
+async fn library_entries(dir: &PathBuf) -> Vec<(String, u64)> {
     let mut names = Vec::new();
     let Ok(mut rd) = tokio::fs::read_dir(dir).await else {
         return names;
@@ -296,7 +296,8 @@ async fn library_entries(dir: &PathBuf) -> Vec<String> {
                 continue;
             }
             if safe_file_name(s).is_some() {
-                names.push(s.to_string());
+                let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
+                names.push((s.to_string(), size));
             }
         }
     }
@@ -304,20 +305,33 @@ async fn library_entries(dir: &PathBuf) -> Vec<String> {
     names
 }
 
-fn library_page(files: &[String]) -> Html<String> {
+fn fmt_size(b: u64) -> String {
+    if b < 1024 {
+        format!("{} B", b)
+    } else if b < 1024 * 1024 {
+        format!("{:.1} KB", b as f64 / 1024.0)
+    } else if b < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", b as f64 / 1048576.0)
+    } else {
+        format!("{:.2} GB", b as f64 / 1073741824.0)
+    }
+}
+
+fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
     let mut rows = String::new();
-    for name in files {
+    for (name, size) in files {
         let enc = url_encode(name);
         let esc = html_escape(name);
+        let fsize = fmt_size(*size);
         if is_video(name) {
             rows.push_str(&format!(
-                r#"<div class="row"><a class="watch" href="/watch?v={0}">{1}</a><form method="post" action="/upload/delete"><input type="hidden" name="name" value="{1}"><button class="del" type="button" onclick="return armDel(this)">Delete</button></form></div>"#,
-                enc, esc
+                r#"<div class="row"><a class="watch" href="/watch?v={0}">{1}</a><span class="fsize">{2}</span><form method="post" action="/upload/delete"><input type="hidden" name="name" value="{1}"><button class="del" type="button" onclick="return armDel(this)">Delete</button></form></div>"#,
+                enc, esc, fsize
             ));
         } else {
             rows.push_str(&format!(
-                r#"<div class="row"><a class="watch" href="/media/{0}?dl=1">{1}</a><form method="post" action="/upload/delete"><input type="hidden" name="name" value="{1}"><button class="del" type="button" onclick="return armDel(this)">Delete</button></form></div>"#,
-                enc, esc
+                r#"<div class="row"><a class="watch" href="/media/{0}?dl=1">{1}</a><span class="fsize">{2}</span><form method="post" action="/upload/delete"><input type="hidden" name="name" value="{1}"><button class="del" type="button" onclick="return armDel(this)">Delete</button></form></div>"#,
+                enc, esc, fsize
             ));
         }
     }
@@ -340,10 +354,18 @@ fn library_page(files: &[String]) -> Html<String> {
 .qbar{{height:100%;width:0%;background:#f4f4f5}}
 .qrow{{display:flex;gap:.4rem;margin-top:.3rem;align-items:center;flex-wrap:wrap}}
 .qbtn{{background:transparent;color:#e4e4e7;border:1px solid #52525b;border-radius:6px;padding:.3rem .6rem;font-size:.75rem;font-family:inherit;cursor:pointer}}
-.qsel{{background:#121214;color:#f4f4f5;border:1px solid #52525b;border-radius:6px;padding:.3rem;font-size:.75rem;font-family:inherit;max-width:100%}}
+.qsel{{background:#121214;color:#f4f4f5;border:1px solid #52525b;border-radius:6px;padding:.3rem;font-size:.75rem;font-family:inherit;max-width:100%;min-height:44px}}
 .xcode{{font-size:.7rem;color:#71717a;flex-shrink:0;white-space:nowrap}}
+.fsize{{font-size:.72rem;color:#71717a;white-space:nowrap;flex-shrink:0}}
+.pool{{font-size:.75rem;color:#71717a;margin:.2rem 0 .3rem}}
+.poolbarw{{height:4px;background:#27272a;border-radius:2px;overflow:hidden;margin-bottom:1rem}}
+.poolbar{{height:100%;background:#71717a}}
+.qbtn{{background:transparent;color:#e4e4e7;border:1px solid #52525b;border-radius:6px;padding:.3rem .6rem;font-size:.75rem;font-family:inherit;cursor:pointer;min-height:44px;min-width:44px}}
+.del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem;min-height:44px;min-width:44px}}
+@media (max-width:480px){{body{{padding:1rem}}.dz{{padding:1.2rem .8rem}}.row{{padding:.6rem .7rem;gap:.6rem}}.fsize{{font-size:.68rem}}}}
 .uperr{{color:#f87171;font-size:.8rem;margin:0 0 .6rem}}</style>
 </head><body><main><h1>MEDIA</h1>
+<p class="pool">{pool_txt}</p><div class="poolbarw"><div class="poolbar" style="width:{pool_pct}%"></div></div>
 <div class="dz" id="dz"><p class="dz-t">Drop files here or tap to browse</p><p class="dz-s">Resumable chunks · any type · .vtt attaches to a video · pool max 50 GB</p><input type="file" id="dzfile" multiple hidden></div>
 <div id="queue"></div>
 <p class="uperr" id="uperr" hidden></p>{rows}</main>
@@ -353,6 +375,7 @@ function armDel(btn){{if(btn.dataset.armed){{btn.closest('form').submit();return
 var fi=document.getElementById('dzfile'),qv=document.getElementById('queue');
 var CHUNK=8*1024*1024,items=[],active=null;
 function mb(n){{return (n/1048576).toFixed(n<10485760?1:0)+' MB';}}
+function fsz(n){{return n>=1073741824?(n/1073741824).toFixed(2)+' GB':mb(n);}}
 function eta(s){{if(!isFinite(s)||s<0)return '';s=Math.round(s);if(s<60)return s+'s left';return Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+' left';}}
 function ukey(it){{return 'beam-up-'+it.size+'-'+it.name;}}
 function vids(){{var a=[],els=document.querySelectorAll('.row .watch');for(var i=0;i<els.length;i++)a.push(els[i].textContent);return a;}}
@@ -407,7 +430,7 @@ if(!fr.ok)throw new Error('finish failed');
 var fj=await fr.json();
 try{{localStorage.removeItem(ukey(it));}}catch(_e){{}}
 it.state='done';it.received=it.size;
-if(!it.cap)addRow(fj.name);
+if(!it.cap)addRow(fj.name,it.size);
 render(it);
 setTimeout(function(){{var el=document.getElementById(it.el);if(el)el.remove();var ix=items.indexOf(it);if(ix>=0)items.splice(ix,1);}},6000);
 }}catch(e){{it.state='error';it.err=String((e&&e.message)||e).slice(0,120);render(it);}}
@@ -427,19 +450,22 @@ else txt+=' …';
 if(old)old.textContent=txt;
 else{{var s=document.createElement('span');s.className='xcode';s.textContent=txt;a.parentNode.insertBefore(s,a.nextSibling);}}}}}}).catch(function(){{}});}}
 setInterval(pollXcode,4000);pollXcode();
-function addRow(name){{var empty=document.querySelector('main .empty');if(empty)empty.remove();var isVid=/\.(mov|mp4|mkv)$/i.test(name);
+function addRow(name,size){{var empty=document.querySelector('main .empty');if(empty)empty.remove();var isVid=/\.(mov|mp4|mkv)$/i.test(name);
 var div=document.createElement('div');div.className='row';
 var a=document.createElement('a');a.className='watch';a.textContent=name;
 a.href=isVid?'/watch?v='+encodeURIComponent(name):'/media/'+encodeURIComponent(name)+'?dl=1';
+var sz=document.createElement('span');sz.className='fsize';sz.textContent=(size>=1073741824?(size/1073741824).toFixed(2)+' GB':(size/1048576).toFixed(size<10485760?1:0)+' MB');
 var f=document.createElement('form');f.method='post';f.action='/upload/delete';
 var h=document.createElement('input');h.type='hidden';h.name='name';h.value=name;
 var b=document.createElement('button');b.className='del';b.type='button';b.textContent='Delete';
 b.setAttribute('onclick','return armDel(this)');
-f.appendChild(h);f.appendChild(b);div.appendChild(a);div.appendChild(f);
+f.appendChild(h);f.appendChild(b);div.appendChild(a);div.appendChild(sz);div.appendChild(f);
 var qv2=document.getElementById('queue');qv2.parentNode.insertBefore(div,qv2.nextSibling);}}
 }})();
 </script></body></html>"#,
-        rows = rows
+        rows = rows,
+        pool_txt = format!("{} / 50 GB used", fmt_size(pool_used)),
+        pool_pct = (pool_used * 100 / MAX_POOL_BYTES).min(100)
     ))
 }
 
@@ -448,7 +474,8 @@ async fn upload_page(State(state): State<AppState>, headers: HeaderMap) -> Respo
         return login_page().into_response();
     }
     let files = library_entries(&state.media_dir).await;
-    library_page(&files).into_response()
+    let pool_used = dir_usage(&state.media_dir).await;
+    library_page(&files, pool_used).into_response()
 }
 
 #[derive(Deserialize)]
@@ -769,7 +796,7 @@ async fn upload_transcodes(State(state): State<AppState>, headers: HeaderMap) ->
         return axum::Json(serde_json::json!([])).into_response();
     }
     let mut out = Vec::new();
-    for name in library_entries(&state.media_dir).await {
+    for (name, _) in library_entries(&state.media_dir).await {
         if safe_media_name(&name).is_none() {
             continue;
         }
