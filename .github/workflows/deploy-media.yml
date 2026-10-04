@@ -4,7 +4,7 @@ name: Deploy Media Service Dev (beam-media)
 # OWNER SETUP REQUIRED once on the server (not done by this workflow):
 #   1. systemd unit beam-media-dev.service running /opt/beam-media-dev/beam-media
 #      with Environment="MEDIA_DIR=/opt/beam-media-dev/media" "PORT=3005"
-#      "CPU_LIMIT_PCT=25" (caps live box transcodings at 25% of one core)
+#      "CPU_LIMIT_PCT=50" (caps live box transcodings at 50% of one core)
 #      and EnvironmentFile holding UPLOAD_PASSWORD (never commit the secret).
 #   2. Reverse proxy (Caddy) routing /upload*, /watch*, /media/*, /captions/*,
 #      /tracks*, /audio* (paths preserved) to 127.0.0.1:3005 on the dev domain.

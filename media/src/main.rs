@@ -306,6 +306,7 @@ fn login_page() -> Html<String> {
         r#"<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Media Library</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>html{background:#000;user-select:none;-webkit-user-select:none}body{background:#000;color:#f4f4f5;font-family:monospace;display:flex;min-height:100vh;min-height:100dvh;align-items:center;justify-content:center;margin:0}form{border:1px solid #27272a;border-radius:8px;padding:2rem;display:flex;flex-direction:column;gap:1rem;width:min(360px,90vw)}input{background:#121214;border:1px solid #27272a;color:#f4f4f5;border-radius:8px;padding:.8rem;font:inherit}button{background:#f4f4f5;color:#000;border:none;border-radius:8px;padding:.8rem;font:inherit;font-weight:700;cursor:pointer}</style>
 </head><body><form method="post" action="/upload">
 <input type="password" name="password" placeholder="Password" autocomplete="off" autofocus>
@@ -349,9 +350,11 @@ fn fmt_size(b: u64) -> String {
 }
 
 // Displayed in the library header on hover. Deliberately SEPARATE from the
-// main BEAM app versioning (that client is v1.3.x; this service versions
-// on its own).
-const MEDIA_VERSION: &str = "v1.0.0";
+// main BEAM app versioning (that client is v1.3.x). The number comes from
+// Cargo.toml (bump it for meaning); the short git hash is baked in
+// automatically at compile time by build.rs, so every deploy reports the
+// exact commit it runs.
+const MEDIA_VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH"));
 
 fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
     let mut rows = String::new();
@@ -381,7 +384,8 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
         r#"<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Media Library</title>
-<style>html{{background:#000;user-select:none;-webkit-user-select:none}}body{{background:#000;color:#f4f4f5;font-family:monospace;margin:0;padding:1.5rem;min-height:100vh;min-height:100dvh;box-sizing:border-box}}main{{max-width:640px;margin:0 auto}}h1{{font-size:1.1rem}}form.up{{border:1px solid #27272a;border-radius:8px;padding:1.2rem;display:flex;flex-direction:column;gap:.8rem;margin-bottom:1.5rem}}label{{font-size:.8rem;color:#a1a1aa}}input[type=file]{{color:#a1a1aa}}button{{background:#f4f4f5;color:#000;border:none;border-radius:8px;padding:.8rem;font:inherit;font-weight:700;cursor:pointer}}.row{{display:flex;gap:.8rem;align-items:center;border:1px solid #27272a;border-radius:8px;padding:.7rem .9rem;margin-bottom:.6rem}}.watch{{color:#f4f4f5;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}.del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem}}
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap');html{{background:#000;user-select:none;-webkit-user-select:none}}body{{background:#000;color:#f4f4f5;font-family:monospace;margin:0;padding:1.5rem;min-height:100vh;min-height:100dvh;box-sizing:border-box}}main{{max-width:640px;margin:0 auto}}h1{{font-size:1.1rem}}form.up{{border:1px solid #27272a;border-radius:8px;padding:1.2rem;display:flex;flex-direction:column;gap:.8rem;margin-bottom:1.5rem}}label{{font-size:.8rem;color:#a1a1aa}}input[type=file]{{color:#a1a1aa}}button{{background:#f4f4f5;color:#000;border:none;border-radius:8px;padding:.8rem;font:inherit;font-weight:700;cursor:pointer}}.row{{display:flex;gap:.8rem;align-items:center;border:1px solid #27272a;border-radius:8px;padding:.7rem .9rem;margin-bottom:.6rem}}.watch{{color:#f4f4f5;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}.del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem}}
 .del.armed{{background:#f4f4f5;color:#000;border-color:#f4f4f5;font-weight:700}}.empty{{color:#71717a}}
 .dz{{border:2px dashed #52525b;border-radius:12px;padding:1.6rem 1.2rem;text-align:center;margin-bottom:1rem;cursor:pointer}}
 .dz.over{{border-color:#f4f4f5;background:#121214}}
@@ -406,7 +410,7 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
 .brand #beamver{{opacity:0;font-weight:800}}
 .brand .swap.show-ver #beamlogo{{opacity:0}}
 .brand .swap.show-ver #beamver{{opacity:1}}
-.brand .media-sub{{font-size:.8rem;font-weight:400;letter-spacing:.1em;color:#71717a}}
+.brand .media-sub{{font-family:'Bebas Neue','Arial Narrow',sans-serif;font-size:1rem;font-weight:400;letter-spacing:.22em;color:#71717a}}
 .qbtn{{background:transparent;color:#e4e4e7;border:1px solid #52525b;border-radius:6px;padding:.3rem .6rem;font-size:.75rem;font-family:inherit;cursor:pointer;min-height:44px;min-width:44px}}
 .del{{background:transparent;color:#71717a;border:1px solid #27272a;padding:.4rem .7rem;font-size:.75rem;min-height:44px;min-width:44px}}
 @media (max-width:480px){{body{{padding:1rem}}.dz{{padding:1.2rem .8rem}}.row{{padding:.6rem .7rem;gap:.6rem}}.fsize{{font-size:.68rem}}}}
@@ -895,6 +899,17 @@ async fn sweep_uploads(state: &AppState) {
     }
 }
 
+/// Cloud-upload glyph (light on transparent, matches the dark UI).
+const FAVICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 -960 960 960" width="24" fill="#e3e3e3"><path d="M467-120q-73-1-136-14t-110-34.5q-47-21.5-74-50T120-280q0 33 27 61.5t74 50Q268-147 331-134t136 14Zm-15-200q-38-2-73.5-6.5t-67.5-12q-32-7.5-60-17.5t-51-23q23 13 51 23t60 17.5q32 7.5 67.5 12T452-320Zm28-279q89 0 179-26.5T760-679q-11-29-100.5-55T480-760q-91 0-178.5 25.5T200-679q14 27 101.5 53.5T480-599Zm220 479h40v-164l72 72 28-28-120-120-120 120 28 28 72-72v164ZM578.5-98.5Q520-157 520-240t58.5-141.5Q637-440 720-440t141.5 58.5Q920-323 920-240T861.5-98.5Q803-40 720-40T578.5-98.5ZM443-201q3 22 9 42t15 39q-73-1-136-14t-110-34.5q-47-21.5-74-50T120-280v-400q0-66 105.5-113T480-840q149 0 254.5 47T840-680v187q-19-9-39-15t-41-9v-62q-52 29-124 44t-156 15q-85 0-157-15t-123-44v101q51 47 130.5 62.5T480-400h11q-13 18-22.5 38T452-320q-76-4-141-18.5T200-379v99q7 13 30 26.5t56 24q33 10.5 73.5 18T443-201Z"/></svg>"##;
+
+async fn favicon() -> Response {
+    (
+        [(header::CONTENT_TYPE, "image/svg+xml")],
+        FAVICON_SVG,
+    )
+        .into_response()
+}
+
 /// Storage name for an uploaded caption: <video-stem>.<label>.vtt so
 /// several languages coexist; bare names collapse to <video-stem>.vtt.
 /// Typical subtitle names like `movie.pl.vtt` yield label `pl`.
@@ -1001,6 +1016,7 @@ fn player_page(title: &str, media_url: &str, tracks: &[(String, String)]) -> Htm
         r#"<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 html{{background:#000;user-select:none;-webkit-user-select:none}}
@@ -1466,6 +1482,25 @@ async fn probe_duration_ms(path: &PathBuf) -> u64 {
     }
 }
 
+/// Parse ffmpeg `-progress` out_time stamps (`HH:MM:SS.micro`, or seconds).
+/// Returns milliseconds. "N/A" (nothing muxed yet) yields None.
+fn parse_out_time(ts: &str) -> Option<u64> {
+    if ts == "N/A" {
+        return None;
+    }
+    let mut parts = ts.split(':');
+    let h: u64 = parts.next()?.parse().ok()?;
+    let m: u64 = parts.next()?.parse().ok()?;
+    let rest = parts.next()?;
+    let (s_str, frac) = match rest.split_once('.') {
+        Some((s, f)) => (s, f),
+        None => (rest, ""),
+    };
+    let s: u64 = s_str.parse().ok()?;
+    let micro: u64 = format!("{:0<6}", frac).chars().take(6).collect::<String>().parse().ok()?;
+    Some(((h * 60 + m) * 60 + s) * 1000 + micro / 1000)
+}
+
 fn extract_pct(state: &AppState, file: &str) -> Option<u64> {
     if !state.extracting.contains(file) {
         return None;
@@ -1565,9 +1600,12 @@ async fn run_extract(
         tokio::spawn(async move {
             let mut lines = BufReader::new(out).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                if let Some(ms) = line.strip_prefix("out_time_ms=") {
-                    if let Ok(n) = ms.trim().parse::<u64>() {
-                        progress.insert(key.clone(), n);
+                // NOTE: parse the human `out_time=HH:MM:SS.micro` stamp, NOT
+                // the out_time_ms field — some builds emit microseconds in
+                // the ms slot (1000x over), which pinned us at 99% forever.
+                if let Some(ts) = line.strip_prefix("out_time=") {
+                    if let Some(ms) = parse_out_time(ts.trim()) {
+                        progress.insert(key.clone(), ms);
                     }
                 } else if line.starts_with("progress=end") {
                     break;
@@ -1920,6 +1958,7 @@ async fn main() {
         .route("/tracks", get(tracks_info))
         .route("/tracks/prepare", post(tracks_prepare))
         .route("/audio", get(serve_audio))
+        .route("/favicon.svg", get(favicon))
         .with_state(state);
 
     // Crash leftovers from chunked uploads never survive a restart: their
