@@ -387,7 +387,7 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
 .del.armed{{background:#f4f4f5;color:#000;border-color:#f4f4f5;font-weight:700}}.empty{{color:#71717a}}
 .dz{{border:2px dashed #52525b;border-radius:12px;padding:1.6rem 1.2rem;text-align:center;margin-bottom:1rem;cursor:pointer}}
 .dz.over{{border-color:#f4f4f5;background:#121214}}
-.dz-t{{margin:0 0 .3rem;font-size:.95rem}}.dz-s{{margin:0;font-size:.75rem;color:#71717a}}
+.dz-t{{margin:0;font-size:.95rem}}
 .qitem{{border:1px solid #27272a;border-radius:8px;padding:.7rem .9rem;margin-bottom:.6rem}}
 .qname{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.85rem}}
 .qmeta{{font-size:.75rem;color:#a1a1aa;margin:.25rem 0}}
@@ -415,7 +415,7 @@ fn library_page(files: &[(String, u64)], pool_used: u64) -> Html<String> {
 .uperr{{color:#f87171;font-size:.8rem;margin:0 0 .6rem}}</style>
 </head><body><main><h1 class="brand"><span class="swap" id="swap"><span id="beamlogo">BEAM</span><span id="beamver">{mvershort}</span></span> <span class="media-sub">MEDIA</span></h1>
 <p class="pool">{pool_txt}</p><div class="poolbarw"><div class="poolbar" style="width:{pool_pct}%"></div></div>
-<div class="dz" id="dz"><p class="dz-t">Drop files here or tap to browse</p><p class="dz-s">Resumable chunks · any type · .vtt attaches to a video · pool max 50 GB</p><input type="file" id="dzfile" multiple hidden></div>
+<div class="dz" id="dz"><p class="dz-t">Drop files here or tap to browse</p><input type="file" id="dzfile" multiple hidden></div>
 <div id="queue"></div>
 <p class="uperr" id="uperr" hidden></p>{rows}</main>
 <script>
