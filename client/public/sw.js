@@ -1,8 +1,9 @@
 /* BEAM service worker — installability + Web Share Target receiver.
  * Kept intentionally dumb: no precaching, no offline shell. Transfers always
  * need a live connection, so the SW only intercepts share-target POSTs,
- * stashes the shared File objects in IndexedDB, and redirects into the app.
- * The page itself (App.jsx) picks the files up and stages them for sending. */
+ * stashes the shared payload (files + text/title/url) in IndexedDB, and
+ * redirects into the app. The page itself (App.jsx) picks it up: files are
+ * staged for sending, text is drafted into the message box. */
 
 const SHARE_DB = 'beam-share';
 const SHARE_STORE = 'files';
@@ -19,12 +20,12 @@ function openShareDb() {
   });
 }
 
-function stashSharedFiles(files) {
+function stashShare(payload) {
   return openShareDb().then(
     (db) =>
       new Promise((resolve, reject) => {
         const tx = db.transaction(SHARE_STORE, 'readwrite');
-        tx.objectStore(SHARE_STORE).put(files, SHARE_KEY);
+        tx.objectStore(SHARE_STORE).put(payload, SHARE_KEY);
         tx.oncomplete = () => {
           db.close();
           resolve();
@@ -60,8 +61,14 @@ self.addEventListener('fetch', (event) => {
             typeof entry.name === 'string' &&
             entry.size > 0
         );
-        if (files.length > 0) {
-          await stashSharedFiles(files);
+        // Text shares arrive as fields once the manifest declares them.
+        // Stash them next to any files so the app can draft a message
+        // instead of treating the share as a .txt upload.
+        const text = String(formData.get('text') || '').trim();
+        const title = String(formData.get('title') || '').trim();
+        const url = String(formData.get('url') || '').trim();
+        if (files.length > 0 || text || title || url) {
+          await stashShare({ files, text, title, url });
         }
       } catch (_) {
         // Fall through to the app even if stashing failed — the app will
