@@ -46,6 +46,7 @@ const dict = {
     handshakingP2p: 'Negotiating direct P2P upgrade…',
     sharedReady: 'Shared file ready — join a room to send it',
     sharedReplaced: 'Shared file replaced the staged file',
+    sharedTextReady: 'Shared text added — press Send to deliver it',
     shareMissed: 'Shared file didn’t arrive — please share again',
     messagePlaceholder: 'Type a message…',
     sendMessage: 'Send',
@@ -99,6 +100,7 @@ const dict = {
     handshakingP2p: 'Negocjowanie bezpośredniego P2P…',
     sharedReady: 'Udostępniony plik gotowy — dołącz do pokoju, aby go wysłać',
     sharedReplaced: 'Udostępniony plik zastąpił przygotowany plik',
+    sharedTextReady: 'Udostępniony tekst dodany — naciśnij Wyślij',
     shareMissed: 'Plik nie dotarł — udostępnij ponownie',
     messagePlaceholder: 'Napisz wiadomość…',
     sendMessage: 'Wyślij',
@@ -1133,19 +1135,20 @@ function App() {
 
   const inRoom = connectionState !== 'disconnected';
 
-  // Web Share Target: pick up files shared from the Android share sheet.
+  // Web Share Target: pick up files/text shared from the Android share sheet.
   // The service worker stashes them in IndexedDB ('beam-share') and redirects
   // here with ?share-target. Stability rules (share state used to vanish):
   // - read IndexedDB BEFORE stripping the marker; strip only after staging
   // - retry empty reads (SW commit vs page-load race)
   // - pick up orphaned keys even without the marker
   // - replacing an already-staged file shows a notice, never a silent swap
+  // - text shares land in the message box, never as a .txt upload
   // - marker present but nothing arrives (no-SW fallback) shows a notice
   useEffect(() => {
     const hasMarker = window.location.search.includes('share-target');
     let cancelled = false;
 
-    const readSharedFiles = () => new Promise((resolve, reject) => {
+    const readShared = () => new Promise((resolve, reject) => {
       const req = indexedDB.open('beam-share', 1);
       req.onupgradeneeded = () => req.result.createObjectStore('files');
       req.onsuccess = () => {
@@ -1155,13 +1158,44 @@ function App() {
         const get = store.get('shared-files');
         get.onsuccess = () => {
           store.delete('shared-files');
-          resolve(get.result || []);
+          resolve(get.result || null);
         };
         get.onerror = () => reject(get.error);
         tx.oncomplete = () => db.close();
       };
       req.onerror = () => reject(req.error);
     });
+
+    // Older SW versions stashed a bare File[]; newer ones stash
+    // { files, text, title, url }.
+    const normalize = (val) => {
+      if (Array.isArray(val)) return { files: val, text: '', title: '', url: '' };
+      if (val && typeof val === 'object') {
+        return {
+          files: Array.isArray(val.files) ? val.files : [],
+          text: typeof val.text === 'string' ? val.text : '',
+          title: typeof val.title === 'string' ? val.title : '',
+          url: typeof val.url === 'string' ? val.url : ''
+        };
+      }
+      return null;
+    };
+
+    // Some browsers ignore text share params when a target registers files
+    // and instead wrap the text in a small synthetic .txt upload.
+    const WRAPPED_TEXT_NAME = /^(?:shared[-_ ]?text|text|share|content)(?:[ _-]*\(?\d+\)?)?\.txt$/i;
+    const looksLikeWrappedText = (f) =>
+      f && f.size > 0 && f.size <= 8192 && WRAPPED_TEXT_NAME.test(f.name) &&
+      (!f.type || f.type === 'text/plain');
+
+    // A messaging app drafts text + url and drops the title unless it is
+    // the only thing shared.
+    const composeText = (p) => {
+      const body = (p.text || '').trim() || (p.title || '').trim();
+      const url = (p.url || '').trim();
+      if (!url || body.includes(url)) return body;
+      return body ? `${body}\n${url}` : url;
+    };
 
     const stripMarker = () => {
       try {
@@ -1174,26 +1208,42 @@ function App() {
     };
 
     (async () => {
-      let files = [];
+      let payload = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          files = await readSharedFiles();
+          payload = normalize(await readShared());
         } catch (_) {
-          files = [];
+          payload = null;
         }
         if (cancelled) return;
-        if (files && files.length > 0) break;
+        if (payload && (payload.files.length > 0 || composeText(payload))) break;
+        payload = null;
         if (attempt < 2) await new Promise((r) => setTimeout(r, 500));
       }
       if (cancelled) return;
-      const valid = (files || []).filter((f) => f && typeof f.name === 'string' && f.size > 0);
-      if (valid.length === 0) {
-        // Marker but no files: SW wasn't controlling (first install / hard
-        // refresh) and the server fallback dropped the body — say so loudly.
+      if (!payload) {
+        // Marker but nothing arrived: SW wasn't controlling (first install /
+        // hard refresh) and the server fallback dropped the body — say so.
         if (hasMarker) {
           stripMarker();
           flashShareNotice(t.shareMissed);
         }
+        return;
+      }
+      let files = payload.files.filter((f) => f && typeof f.name === 'string' && f.size > 0);
+      let sharedText = composeText(payload);
+      if (!sharedText && files.length === 1 && looksLikeWrappedText(files[0])) {
+        try {
+          sharedText = (await files[0].text()).trim();
+          files = [];
+        } catch (_) {}
+      }
+      if (sharedText) {
+        setMessageInput((prev) => (prev.trim() ? `${prev}\n${sharedText}` : sharedText));
+        flashShareNotice(t.sharedTextReady);
+      }
+      if (files.length === 0) {
+        stripMarker();
         return;
       }
       setSendProgress({
@@ -1213,10 +1263,10 @@ function App() {
           replaceNoticed = true;
           setTimeout(() => flashShareNotice(t.sharedReplaced));
         }
-        return valid.length === 1 ? valid[0] : prev;
+        return files.length === 1 ? files[0] : prev;
       });
-      if (valid.length > 1) {
-        zipFilesAndSetState(valid.map((file) => ({ file, path: file.name })), 'shared-files.zip');
+      if (files.length > 1) {
+        zipFilesAndSetState(files.map((file) => ({ file, path: file.name })), 'shared-files.zip');
       }
       stripMarker();
     })();
