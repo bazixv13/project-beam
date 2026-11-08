@@ -1181,11 +1181,12 @@ function App() {
       return null;
     };
 
-    // Some browsers ignore text share params when a target registers files
-    // and instead wrap the text in a small synthetic .txt upload.
-    const WRAPPED_TEXT_NAME = /^(?:shared[-_ ]?text|text|share|content)(?:[ _-]*\(?\d+\)?)?\.txt$/i;
+    // Chromium's WebAPK path (WebApkShareTargetUtil.tryAddShareTextAsFakeFile)
+    // sends shared text as a fake upload named "shared.txt"; Samsung/other
+    // WebView shells use similar names. Treat those as a message, never a file.
+    const WRAPPED_TEXT_NAME = /^(?:shared(?:[-_ ]?text)?|text|share|content)(?:[ _-]*\(?\d+\)?)?\.txt$/i;
     const looksLikeWrappedText = (f) =>
-      f && f.size > 0 && f.size <= 8192 && WRAPPED_TEXT_NAME.test(f.name) &&
+      f && f.size > 0 && f.size <= 65536 && WRAPPED_TEXT_NAME.test(f.name) &&
       (!f.type || f.type === 'text/plain');
 
     // A messaging app drafts text + url and drops the title unless it is
